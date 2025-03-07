@@ -39,6 +39,10 @@ android {
 }
 
 dependencies {
+
+    // Update Fragment dependency to 1.3.0 or higher
+    implementation ("androidx.fragment:fragment:1.6.2") // Latest stable version
+    implementation ("androidx.fragment:fragment-ktx:1.6.2")
     // Health Services for heart rate
     implementation("androidx.health:health-services-client:1.1.0-alpha05")
     // WebSocket client (OkHttp)
