@@ -15,7 +15,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.zahndy.resohb.R
 import com.zahndy.resohb.data.HeartRateRepository
-import com.zahndy.resohb.data.WebSocketClient
 import com.zahndy.resohb.data.WebSocketServer
 import com.zahndy.resohb.presentation.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -23,7 +22,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 class HeartRateService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -108,9 +111,22 @@ class HeartRateService : Service() {
         return hasBodySensorsPermission && hasNotificationPermission
     }
 
+    // Add power saving mode tracking
+    private var isInPowerSavingMode = false
+    private var hasConnectedClients = false
+
     private fun collectHeartRate() {
         serviceScope.launch {
+            // Check if we should be in power saving mode
+            updatePowerSavingMode()
+            
             heartRateRepository.heartRateFlow()
+                // Only process distinct heart rate values
+                .distinctUntilChanged()
+                // Sample the flow based on our sample rate
+                .sample(heartRateRepository.getCurrentSampleRate().milliseconds)
+                // Use conflate to drop intermediary values if processing is slow
+                .conflate()
                 .catch { e ->
                     // Handle errors
                     stopSelf()
@@ -121,11 +137,33 @@ class HeartRateService : Service() {
 
                     // Update notification with current heart rate and number of connected clients
                     val clientCount = webSocketServer.getConnectedClientCount()
-                    val clientText = if (clientCount == 1) "1 client" else "$clientCount clients"
-                    val notification = createNotification("HR: $heartRate BPM | $clientText connected")
-                    val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                    notificationManager.notify(NOTIFICATION_ID, notification)
+                    
+                    // Only update notification if we have clients
+                    if (clientCount > 0) {
+                        val clientText = if (clientCount == 1) "1 client" else "$clientCount clients"
+                        val notification = createNotification("HR: $heartRate BPM | $clientText connected")
+                        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                        notificationManager.notify(NOTIFICATION_ID, notification)
+                    }
+                    
+                    // Periodically check if power saving mode changed
+                    updatePowerSavingMode()
                 }
+        }
+    }
+    
+    // Update power saving mode and adjust sampling rate
+    private fun updatePowerSavingMode() {
+        // Check if power saving mode is on
+        val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val newPowerSavingMode = powerManager.isPowerSaveMode
+        val newHasConnectedClients = webSocketServer.getConnectedClientCount() > 0
+        
+        if (newPowerSavingMode != isInPowerSavingMode || newHasConnectedClients != hasConnectedClients) {
+            isInPowerSavingMode = newPowerSavingMode
+            hasConnectedClients = newHasConnectedClients
+            
+            heartRateRepository.updatePowerState(powerSaving = isInPowerSavingMode, activeClients = hasConnectedClients)
         }
     }
 

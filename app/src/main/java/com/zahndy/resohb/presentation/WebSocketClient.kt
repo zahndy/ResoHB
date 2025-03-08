@@ -1,6 +1,5 @@
 package com.zahndy.resohb.data
 
-import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -10,7 +9,6 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 
 class WebSocketClient(serverUrl: String) {

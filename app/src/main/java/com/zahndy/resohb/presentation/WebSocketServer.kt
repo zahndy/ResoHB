@@ -3,12 +3,6 @@ package com.zahndy.resohb.data
 import android.content.Context
 import android.os.BatteryManager
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.io.IOException
 import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArraySet
 import org.java_websocket.WebSocket
@@ -27,6 +21,13 @@ class WebSocketServer(
     private val batteryManager by lazy {
         context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
     }
+    
+    // Add adaptive interval tracking
+    private var lastHeartRate = -1
+    private var lastBatteryPercentage = -1
+    private var lastBatteryCharging = false // Add tracking for last charging state
+    private var lastBatteryUpdate = 0L
+    private val BATTERY_UPDATE_INTERVAL = 60_000L // Only update battery every minute
 
     // Start the server
     fun start() {
@@ -37,6 +38,10 @@ class WebSocketServer(
             // Add these two options to help with socket reuse
             server?.isReuseAddr = true
             server?.isTcpNoDelay = true
+            
+            // Lower the server connection read timeout when idle
+            server?.connectionLostTimeout = 60 // 60 seconds
+            
             server?.start()
             isRunning = true
             Log.d(TAG, "WebSocket server started on port $port")
@@ -73,15 +78,40 @@ class WebSocketServer(
             return
         }
 
+        // Only send heart rate if it changed
+        if (heartRate != lastHeartRate) {
+            val messageHeartRate = "0|$heartRate"
+            sendToAllClients(messageHeartRate)
+            lastHeartRate = heartRate
+        }
 
-        val batteryPercentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        val messageBatteryPercentage = "1|$batteryPercentage"
-        val messageHeartRate = "0|$heartRate"
-
+        // Check if it's time to update battery percentage (once per minute)
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastBatteryUpdate >= BATTERY_UPDATE_INTERVAL) {
+            val batteryPercentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            
+            // Only send battery percentage if it changed
+            if (batteryPercentage != lastBatteryPercentage) {
+                sendToAllClients("1|$batteryPercentage")
+                lastBatteryPercentage = batteryPercentage
+            }
+            
+            lastBatteryUpdate = currentTime
+        }
+        
+        // Check charging status on every heart rate update, independent of timer
+        val isCharging = batteryManager.isCharging
+        if (isCharging != lastBatteryCharging) {
+            sendToAllClients("2|$isCharging")
+            lastBatteryCharging = isCharging
+        }
+    }
+    
+    // Helper method to send messages to all clients
+    private fun sendToAllClients(message: String) {
         try {
             for (client in connectedClients) {
-                client.send(messageHeartRate)
-                client.send(messageBatteryPercentage)
+                client.send(message)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error broadcasting heart rate: ${e.message}", e)
@@ -93,6 +123,16 @@ class WebSocketServer(
         override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {
             connectedClients.add(conn)
             Log.d(TAG, "New client connected: ${conn.remoteSocketAddress}, total clients: ${connectedClients.size}")
+            
+            // Send initial values to new client
+            if (lastHeartRate >= 0) {
+                conn.send("0|$lastHeartRate")
+            }
+            if (lastBatteryPercentage >= 0) {
+                conn.send("1|$lastBatteryPercentage")
+            }
+            // Also send initial charging status
+            conn.send("2|$lastBatteryCharging")
         }
 
         override fun onClose(conn: WebSocket, code: Int, reason: String, remote: Boolean) {
