@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -54,13 +55,15 @@ import androidx.wear.tooling.preview.devices.WearDevices
 import com.zahndy.resohb.R
 import com.zahndy.resohb.presentation.theme.Reso_Theme
 import com.zahndy.resohb.service.HeartRateService
+import java.net.NetworkInterface
+import java.util.Collections
 
 
 class MainActivity : ComponentActivity() {
     companion object {
         const val PREFS_NAME = "HeartRateMonitorPrefs"
-        const val SERVER_URL_KEY = "server_url"
-        const val DEFAULT_SERVER_URL = "192.0.0.0:9555"
+        const val SERVER_PORT_KEY = "server_port"
+        const val DEFAULT_SERVER_PORT = 9555
     }
 
     private val _isServiceRunning = mutableStateOf(false)
@@ -83,12 +86,16 @@ class MainActivity : ComponentActivity() {
         setTheme(android.R.style.Theme_DeviceDefault)
 
         setContent {
-            // Get saved URL from SharedPreferences
+            // Get saved port from SharedPreferences
             val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val savedUrl = prefs.getString(SERVER_URL_KEY, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
+            val savedPort = prefs.getInt(SERVER_PORT_KEY, DEFAULT_SERVER_PORT)
+
+            // Get device IP address to display
+            val deviceIp = getDeviceIpAddress()
 
             WearApp(
-                initialServerUrl = savedUrl,
+                deviceIpAddress = deviceIp,
+                serverPort = savedPort,
                 isServiceRunning = isServiceRunning,
                 onToggleService = {
                     if (isServiceRunning) {
@@ -97,12 +104,36 @@ class MainActivity : ComponentActivity() {
                         startHeartRateMonitoring()
                     }
                 },
-                onUrlChange = { newUrl ->
-                    // Save new URL to SharedPreferences
-                    prefs.edit().putString(SERVER_URL_KEY, newUrl).apply()
+                onPortChange = { newPort ->
+                    // Save new port to SharedPreferences
+                    try {
+                        val port = newPort.toInt()
+                        if (port in 1024..65535) {
+                            prefs.edit().putInt(SERVER_PORT_KEY, port).apply()
+                        }
+                    } catch (e: NumberFormatException) {
+                        // Invalid port format, ignore
+                    }
                 }
             )
         }
+    }
+
+    private fun getDeviceIpAddress(): String {
+        try {
+            val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+            for (intf in interfaces) {
+                val addrs = Collections.list(intf.inetAddresses)
+                for (addr in addrs) {
+                    if (!addr.isLoopbackAddress && addr.hostAddress?.contains(':') == false) {
+                        return addr.hostAddress
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error getting device IP: ${e.message}", e)
+        }
+        return "127.0.0.1" // Fallback to localhost
     }
 
     private fun startHeartRateMonitoring() {
@@ -129,19 +160,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startHeartRateService() {
-        // Existing implementation
         val serviceIntent = Intent(this, HeartRateService::class.java)
-        // Get the current server URL from SharedPreferences
+        // Get the server port from SharedPreferences
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val serverUrl = prefs.getString(SERVER_URL_KEY, DEFAULT_SERVER_URL)
+        val serverPort = prefs.getInt(SERVER_PORT_KEY, DEFAULT_SERVER_PORT)
 
-        // Pass the server URL to the service - add http:// prefix if not present
-        val finalUrl = if (serverUrl?.startsWith("ws://") == true || serverUrl?.startsWith("wss://") == true) {
-            serverUrl
-        } else {
-            "ws://${serverUrl ?: DEFAULT_SERVER_URL}"
-        }
-        serviceIntent.putExtra("server_url", finalUrl)
+        // Pass the server port to the service
+        serviceIntent.putExtra("server_port", serverPort)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)
@@ -163,13 +188,17 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun WearApp(
-    initialServerUrl: String,
+    deviceIpAddress: String,
+    serverPort: Int,
     isServiceRunning: Boolean,
     onToggleService: () -> Unit,
-    onUrlChange: (String) -> Unit
+    onPortChange: (String) -> Unit
 ) {
-    var serverUrl by remember { mutableStateOf(initialServerUrl) }
+    var port by remember { mutableStateOf(serverPort.toString()) }
     val listState = rememberScalingLazyListState()
+
+    // Format connection string for display
+    val connectionAddress = "ws://$deviceIpAddress:$serverPort"
 
     Reso_Theme {
         Box(
@@ -187,14 +216,13 @@ fun WearApp(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 item {
-
                     Text(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 0.dp),
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colors.primary,
-                        text = "Resonite HR Monitor"
+                        text = "Resonite HR Server"
                     )
                 }
 
@@ -204,11 +232,35 @@ fun WearApp(
 
                 item {
                     Button(
-                        modifier = Modifier
-                            .width(140.dp),
+                        modifier = Modifier.width(140.dp),
                         onClick = onToggleService
                     ) {
-                        Text(if (isServiceRunning) "Stop" else "Start")
+                        Text(if (isServiceRunning) "Stop Server" else "Start Server")
+                    }
+                }
+
+                if (isServiceRunning) {
+                    item {
+                        Text(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 0.dp),
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colors.secondary,
+                            text = "Client should connect to:"
+                        )
+                    }
+
+                    item {
+                        Text(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            textAlign = TextAlign.Center,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colors.primary,
+                            text = connectionAddress
+                        )
                     }
                 }
 
@@ -220,29 +272,27 @@ fun WearApp(
                         textAlign = TextAlign.Center,
                         fontSize = 10.sp,
                         color = MaterialTheme.colors.secondary,
-                        text = "Enter Server Adress:"
+                        text = "Server Port:"
                     )
                 }
 
                 item {
                     TextField(
-                        value = serverUrl,
+                        value = port,
                         onValueChange = {
-                            serverUrl = it
-                            onUrlChange(it)
+                            port = it
+                            onPortChange(it)
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .fillMaxHeight()
                             .height(47.dp)
-                            .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 0.dp),
+                            .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 2.dp),
                         shape = RoundedCornerShape(23.dp),
                         textStyle = TextStyle(textAlign = TextAlign.Center),
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
                 }
-
             }
         }
     }
@@ -262,9 +312,10 @@ fun Greeting(greetingName: String) {
 @Composable
 fun DefaultPreview() {
     WearApp(
-        initialServerUrl = MainActivity.DEFAULT_SERVER_URL,
+        deviceIpAddress = "ws://localhost:1234",
+        serverPort = 9333,
         isServiceRunning = false,
         onToggleService = {},
-        onUrlChange = {}
+        onPortChange = {}
     )
 }

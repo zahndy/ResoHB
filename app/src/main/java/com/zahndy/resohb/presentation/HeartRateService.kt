@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import com.zahndy.resohb.R
 import com.zahndy.resohb.data.HeartRateRepository
 import com.zahndy.resohb.data.WebSocketClient
+import com.zahndy.resohb.data.WebSocketServer
 import com.zahndy.resohb.presentation.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,16 +28,16 @@ import kotlinx.coroutines.launch
 class HeartRateService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var heartRateRepository: HeartRateRepository
-    private lateinit var webSocketClient: WebSocketClient
+    private lateinit var webSocketServer: WebSocketServer
 
-    // Default server URL (will be overridden by intent extra if provided)
-    private var serverUrl = "ws://192.168.1.100:8080/heartrate" // Use HTTP protocol for WebSocket
+    // Default server port (will be overridden by intent extra if provided)
+    private var serverPort = 9555
 
     companion object {
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "HeartRateChannel"
         private const val PERMISSION_REQUEST_CODE = 100
-        private const val SERVER_URL_EXTRA = "server_url"
+        private const val SERVER_PORT_EXTRA = "server_port"
         const val BODY_SENSORS_PERMISSION = android.Manifest.permission.BODY_SENSORS
     }
 
@@ -47,21 +48,15 @@ class HeartRateService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Get server URL from intent extra
-        intent?.getStringExtra(SERVER_URL_EXTRA)?.let {
-            if (it.isNotEmpty()) {
-                // Make sure we use http:// prefix
-                serverUrl = if (it.startsWith("ws://") || it.startsWith("wss://")) {
-                    it
-                } else {
-                    "ws://$it"
-                }
-                Log.d("HeartRateService", "Using server URL: $serverUrl")
+        // Get server port from intent extra if available
+        intent?.getIntExtra(SERVER_PORT_EXTRA, serverPort)?.let {
+            if (it > 0) {
+                serverPort = it
             }
         }
-        
-        // Initialize WebSocketClient with server URL - it will format the URL correctly
-        webSocketClient = WebSocketClient(serverUrl)
+
+        // Initialize WebSocketServer with port
+        webSocketServer = WebSocketServer(applicationContext, serverPort)
 
         if (!hasRequiredPermissions()) {
             Log.e("HeartRateService", "Missing required permissions")
@@ -69,14 +64,13 @@ class HeartRateService : Service() {
             return START_NOT_STICKY
         }
 
-
-        val notification = createNotification("Monitoring heart rate...")
+        val notification = createNotification("Starting heart rate server...")
         startForeground(NOTIFICATION_ID, notification)
 
         serviceScope.launch {
-            webSocketClient.connect()
+            // Start WebSocket server
+            webSocketServer.start()
 
-            // Add detailed logging to diagnose the heart rate capability
             val hasCapability = heartRateRepository.hasHeartRateCapability()
             Log.d("HeartRateService", "Heart rate capability check result: $hasCapability")
 
@@ -122,11 +116,13 @@ class HeartRateService : Service() {
                     stopSelf()
                 }
                 .collect { heartRate ->
-                    // Send heart rate over WebSocket
-                    webSocketClient.sendHeartRate(heartRate)
+                    // Send heart rate via WebSocket server
+                    webSocketServer.broadcastHeartRate(heartRate)
 
-                    // Update notification with current heart rate
-                    val notification = createNotification("Heart rate: $heartRate BPM")
+                    // Update notification with current heart rate and number of connected clients
+                    val clientCount = webSocketServer.getConnectedClientCount()
+                    val clientText = if (clientCount == 1) "1 client" else "$clientCount clients"
+                    val notification = createNotification("HR: $heartRate BPM | $clientText connected")
                     val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
                     notificationManager.notify(NOTIFICATION_ID, notification)
                 }
@@ -164,7 +160,11 @@ class HeartRateService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        webSocketClient.disconnect()
+        try {
+            webSocketServer.stop()
+        } catch (e: Exception) {
+            Log.e("HeartRateService", "Error stopping WebSocket server: ${e.message}", e)
+        }
         serviceScope.cancel()
         super.onDestroy()
     }

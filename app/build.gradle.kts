@@ -40,6 +40,7 @@ android {
 
 dependencies {
 
+    implementation("org.java-websocket:Java-WebSocket:1.5.3")
     // Update Fragment dependency to 1.3.0 or higher
     implementation ("androidx.fragment:fragment:1.6.2") // Latest stable version
     implementation ("androidx.fragment:fragment-ktx:1.6.2")
