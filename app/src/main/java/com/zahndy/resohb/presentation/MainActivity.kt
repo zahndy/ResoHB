@@ -73,6 +73,9 @@ class MainActivity : ComponentActivity() {
 
     private val _isServiceRunning = mutableStateOf(false)
     val isServiceRunning get() = _isServiceRunning.value
+    
+    private val _networkStatus = mutableStateOf("Unknown")
+    val networkStatus get() = _networkStatus.value
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -95,6 +98,12 @@ class MainActivity : ComponentActivity() {
 
         // Initialize connectivity manager
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        
+        // Register a network callback to monitor network changes
+        registerNetworkCallback()
+        
+        // Get initial network status
+        updateNetworkStatus()
 
         // Force stop any existing service without checking
         val serviceIntent = Intent(this, HeartRateService::class.java)
@@ -136,7 +145,8 @@ class MainActivity : ComponentActivity() {
                     } catch (e: NumberFormatException) {
                         // Invalid port format, ignore
                     }
-                }
+                },
+                networkStatus = networkStatus
             )
         }
     }
@@ -233,6 +243,9 @@ class MainActivity : ComponentActivity() {
                 // Wi-Fi network has been acquired, bind it to use this network by default
                 connectivityManager?.bindProcessToNetwork(network)
                 Log.d("MainActivity", "Wi-Fi network available and bound to process")
+                
+                // Update network status
+                updateNetworkStatus()
 
                 // After Wi-Fi is available, we can proceed with checking permissions
                 // The actual service start happens after permissions check
@@ -241,7 +254,27 @@ class MainActivity : ComponentActivity() {
             override fun onLost(network: Network) {
                 super.onLost(network)
                 Log.d("MainActivity", "Wi-Fi network lost")
-                // Optionally handle network loss scenario
+                
+                // Update network status
+                updateNetworkStatus()
+                
+                // Attempt to reconnect to Wi-Fi when connection is lost
+                if (isServiceRunning) {
+                    Log.d("MainActivity", "Attempting to reconnect to Wi-Fi...")
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        try {
+                            connectivityManager?.requestNetwork(
+                                NetworkRequest.Builder()
+                                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                                    .build(),
+                                this
+                            )
+                            Log.d("MainActivity", "Re-requested Wi-Fi network after loss")
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "Error re-requesting Wi-Fi network: ${e.message}", e)
+                        }
+                    }, 1000) // Wait a second before attempting to reconnect
+                }
             }
         }
 
@@ -280,6 +313,45 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun registerNetworkCallback() {
+        val networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                super.onAvailable(network)
+                updateNetworkStatus()
+            }
+
+            override fun onLost(network: Network) {
+                super.onLost(network)
+                updateNetworkStatus()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                super.onCapabilitiesChanged(network, networkCapabilities)
+                updateNetworkStatus()
+            }
+        }
+        
+        // Register the callback for all network types
+        val request = NetworkRequest.Builder().build()
+        connectivityManager?.registerNetworkCallback(request, networkCallback)
+    }
+
+    private fun updateNetworkStatus() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = cm.activeNetwork ?: return
+        val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return
+        
+        _networkStatus.value = when {
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) -> "Bluetooth"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular"
+            else -> "Unknown"
+        }
+    }
+
     override fun onDestroy() {
         // Make sure to release Wi-Fi when activity is destroyed
         releaseWifiConnectivity()
@@ -302,7 +374,8 @@ fun WearApp(
     serverPort: Int,
     isServiceRunning: Boolean,
     onToggleService: () -> Unit,
-    onPortChange: (String) -> Unit
+    onPortChange: (String) -> Unit,
+    networkStatus: String = "Unknown"
 ) {
     var port by remember { mutableStateOf(serverPort.toString()) }
     val listState = rememberScalingLazyListState()
@@ -418,6 +491,36 @@ fun WearApp(
                         modifier = Modifier.height(4.dp)
                     )
                 }
+
+                    item {
+                        Text(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 0.dp, vertical = 0.dp),
+                            textAlign = TextAlign.Center,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colors.secondary,
+                            text = "Current Watch Network:"
+                        )
+                    }
+
+                    item {
+                        Text(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 0.dp),
+                            textAlign = TextAlign.Center,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colors.primary,
+                            text = networkStatus
+                        )
+                    }
+                    item {
+                        Spacer(
+                            modifier = Modifier.height(10.dp)
+                        )
+                    }
+                
             }
         }
     }
@@ -441,6 +544,7 @@ fun DefaultPreview() {
         serverPort = 9333,
         isServiceRunning = false,
         onToggleService = {},
-        onPortChange = {}
+        onPortChange = {},
+        networkStatus = "Wi-Fi"
     )
 }
