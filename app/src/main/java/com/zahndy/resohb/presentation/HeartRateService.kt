@@ -115,8 +115,11 @@ class HeartRateService : Service() {
         return hasBodySensorsPermission && hasNotificationPermission
     }
     
+    private var lastNotificationUpdate = 0L
+    private val NOTIFICATION_UPDATE_INTERVAL = 2000L // 2 seconds
     private var isInPowerSavingMode = false
     private var hasConnectedClients = false
+    private var currentNetworkType = "Unknown"
 
     private fun collectHeartRate() {
         serviceScope.launch {
@@ -138,15 +141,19 @@ class HeartRateService : Service() {
                     // Send heart rate via WebSocket server
                     webSocketServer.broadcastHeartRate(heartRate)
 
-                    // Update notification with current heart rate and number of connected clients
-                    val clientCount = webSocketServer.getConnectedClientCount()
-                    
-                    // Only update notification if we have clients
-                    if (clientCount > 0) {
-                        val clientText = if (clientCount == 1) "1 client" else "$clientCount clients"
-                        val notification = createNotification("HR: $heartRate BPM | $clientText connected")
-                        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                        notificationManager.notify(NOTIFICATION_ID, notification)
+                    // Update notification less frequently to save resources
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastNotificationUpdate > NOTIFICATION_UPDATE_INTERVAL) {
+                        val clientCount = webSocketServer.getConnectedClientCount()
+                        
+                        // Only update notification if we have clients
+                        if (clientCount > 0) {
+                            val clientText = if (clientCount == 1) "1 client" else "$clientCount clients"
+                            val notification = createNotification("HR: $heartRate BPM | $clientText connected")
+                            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                            notificationManager.notify(NOTIFICATION_ID, notification)
+                            lastNotificationUpdate = currentTime
+                        }
                     }
                     
                     // Periodically check if power saving mode changed
@@ -162,11 +169,28 @@ class HeartRateService : Service() {
         val newPowerSavingMode = powerManager.isPowerSaveMode
         val newHasConnectedClients = webSocketServer.getConnectedClientCount() > 0
         
-        if (newPowerSavingMode != isInPowerSavingMode || newHasConnectedClients != hasConnectedClients) {
+        // Get current network type
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val activeNetwork = cm.activeNetworkInfo
+        val networkType = when {
+            activeNetwork?.type == android.net.ConnectivityManager.TYPE_WIFI -> "Wi-Fi"
+            activeNetwork?.type == android.net.ConnectivityManager.TYPE_MOBILE -> "Cellular"
+            else -> "Unknown"
+        }
+        
+        if (newPowerSavingMode != isInPowerSavingMode || 
+            newHasConnectedClients != hasConnectedClients ||
+            networkType != currentNetworkType) {
+            
             isInPowerSavingMode = newPowerSavingMode
             hasConnectedClients = newHasConnectedClients
+            currentNetworkType = networkType
             
-            heartRateRepository.updatePowerState(powerSaving = isInPowerSavingMode, activeClients = hasConnectedClients)
+            heartRateRepository.updatePowerState(
+                powerSaving = isInPowerSavingMode, 
+                activeClients = hasConnectedClients,
+                networkType = currentNetworkType
+            )
         }
     }
 

@@ -30,6 +30,7 @@ class HeartRateRepository(
     // Track power mode to adjust sample rate
     private var isPowerSavingMode = false
     private var hasActiveClients = false
+    private var currentNetworkType = "Unknown"
     
     // Set a default sample rate that can be adjusted
     private var currentSampleRate = 1000L // milliseconds
@@ -75,22 +76,29 @@ class HeartRateRepository(
     /**
      * Sets the power and client state to adjust sampling behavior
      */
-    fun updatePowerState(powerSaving: Boolean, activeClients: Boolean) {
-        if (isPowerSavingMode != powerSaving || hasActiveClients != activeClients) {
+    fun updatePowerState(powerSaving: Boolean, activeClients: Boolean, networkType: String = "Unknown") {
+        if (isPowerSavingMode != powerSaving || hasActiveClients != activeClients || currentNetworkType != networkType) {
             isPowerSavingMode = powerSaving
             hasActiveClients = activeClients
+            currentNetworkType = networkType
             
             // Adjust sample rate based on state
             currentSampleRate = when {
-                !activeClients -> 5000L // If no clients, very slow sampling (2 seconds) 5s
-                powerSaving -> 2000L // Power saving but clients connected (1 second) 2s
-                else -> 1000L // Normal mode with clients (500ms) 1s
+                !activeClients -> 5000L // No clients: very slow sampling (5s)
+                powerSaving && !networkType.contains("Wi-Fi") -> 3000L // Power saving on cellular: slower (3s)
+                powerSaving && networkType.contains("Wi-Fi") -> 2000L // Power saving on WiFi: moderate (2s)
+                !networkType.contains("Wi-Fi") -> 1500L // Normal mode on cellular (1.5s)
+                else -> 1000L // Best case: normal mode on WiFi (1s)
             }
             
             android.util.Log.d("HeartRateRepository", 
-                "Updated power state - saving: $powerSaving, clients: $activeClients, sample rate: $currentSampleRate ms")
+                "Updated state - saving: $powerSaving, clients: $activeClients, " +
+                "network: $networkType, sample rate: $currentSampleRate ms")
         }
     }
+
+    private var lastHeartRate = -1
+    private val heartRateThreshold = 3 // Only report changes of 3+ BPM
 
     fun heartRateFlow(): Flow<Int> = callbackFlow {
         val callback = object : MeasureCallback {
@@ -108,7 +116,12 @@ class HeartRateRepository(
             override fun onDataReceived(data: DataPointContainer) {
                 val heartRateBpm = data.getData(DataType.HEART_RATE_BPM)
                 heartRateBpm.forEach {
-                    trySend(it.value.toInt())
+                    val newRate = it.value.toInt()
+                    // Only send if the difference is significant or it's the first reading
+                    if (lastHeartRate == -1 || Math.abs(newRate - lastHeartRate) >= heartRateThreshold) {
+                        lastHeartRate = newRate
+                        trySend(newRate)
+                    }
                 }
             }
         }

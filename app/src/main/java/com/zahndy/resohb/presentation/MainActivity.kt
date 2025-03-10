@@ -13,10 +13,13 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -73,7 +76,7 @@ class MainActivity : ComponentActivity() {
 
     private val _isServiceRunning = mutableStateOf(false)
     val isServiceRunning get() = _isServiceRunning.value
-    
+
     private val _networkStatus = mutableStateOf("Unknown")
     val networkStatus get() = _networkStatus.value
 
@@ -98,10 +101,10 @@ class MainActivity : ComponentActivity() {
 
         // Initialize connectivity manager
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        
+
         // Register a network callback to monitor network changes
         registerNetworkCallback()
-        
+
         // Get initial network status
         updateNetworkStatus()
 
@@ -149,6 +152,7 @@ class MainActivity : ComponentActivity() {
                 networkStatus = networkStatus
             )
         }
+        requestBatteryOptimizationExemption()
     }
 
     private fun getDeviceIpAddress(): String {
@@ -243,7 +247,7 @@ class MainActivity : ComponentActivity() {
                 // Wi-Fi network has been acquired, bind it to use this network by default
                 connectivityManager?.bindProcessToNetwork(network)
                 Log.d("MainActivity", "Wi-Fi network available and bound to process")
-                
+
                 // Update network status
                 updateNetworkStatus()
 
@@ -254,10 +258,10 @@ class MainActivity : ComponentActivity() {
             override fun onLost(network: Network) {
                 super.onLost(network)
                 Log.d("MainActivity", "Wi-Fi network lost")
-                
+
                 // Update network status
                 updateNetworkStatus()
-                
+
                 // Attempt to reconnect to Wi-Fi when connection is lost
                 if (isServiceRunning) {
                     Log.d("MainActivity", "Attempting to reconnect to Wi-Fi...")
@@ -333,7 +337,7 @@ class MainActivity : ComponentActivity() {
                 updateNetworkStatus()
             }
         }
-        
+
         // Register the callback for all network types
         val request = NetworkRequest.Builder().build()
         connectivityManager?.registerNetworkCallback(request, networkCallback)
@@ -343,15 +347,32 @@ class MainActivity : ComponentActivity() {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val activeNetwork = cm.activeNetwork ?: return
         val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return
-        
+
         _networkStatus.value = when {
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) -> "Bluetooth"
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi   ✓"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) -> "Bluetooth   X"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular   X"
             else -> "Unknown"
         }
     }
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val packageName = packageName
 
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                try {
+                    val intent = Intent().apply {
+                        action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Failed to request battery optimization exemption", e)
+                }
+            }
+        }
+    }
     override fun onDestroy() {
         // Make sure to release Wi-Fi when activity is destroyed
         releaseWifiConnectivity()
@@ -415,9 +436,14 @@ fun WearApp(
                 item {
                     Button(
                         modifier = Modifier.width(140.dp),
-                        onClick = onToggleService
+                        onClick = onToggleService,
                     ) {
-                        Text(if (isServiceRunning) "Stop Server" else "Start Server")
+                        Text(
+                            text = when {
+                                isServiceRunning -> "Stop Server"
+                                else -> "Start Server"
+                            }
+                        )
                     }
                 }
 

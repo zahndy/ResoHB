@@ -56,30 +56,28 @@ class WebSocketServer(
             // First mark server as not running to prevent new operations
             isRunning = false
             
-            // Use a more graceful shutdown with timeout
-            server?.stop(1000) // 1000ms timeout
-            
-            // Close all client connections
-            connectedClients.forEach { session ->
-                try {
-                    session.close()
-                } catch (e: Exception) {
-                    Log.e("WebSocketServer", "Error closing client session: ${e.message}")
-                }
-            }
+            // Clear clients first to prevent them trying to reconnect during shutdown
+            val clientsToClose = ArrayList(connectedClients)
             connectedClients.clear()
             
-            // Add explicit release of resources
-            server = null
+            // Close client connections with a reason
+            for (client in clientsToClose) {
+                try {
+                    client.close(1001, "Server shutting down")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error closing client: ${e.message}")
+                }
+            }
             
-            // Add a small delay to ensure socket is fully closed
-            Thread.sleep(100)
+            // Now stop the server with a timeout
+            server?.stop(1500)
+            server = null
             
             Log.d(TAG, "WebSocket server stopped")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping WebSocket server: ${e.message}", e)
         } finally {
-            // Ensure server reference is cleared even if exception occurs
+            // Ensure server reference is cleared
             server = null
         }
     }
@@ -90,22 +88,36 @@ class WebSocketServer(
     // Get number of connected clients
     fun getConnectedClientCount(): Int = connectedClients.size
 
+    private var heartRateBuffer = mutableListOf<Int>()
+    private var lastBroadcastTime = 0L
+    private val BROADCAST_INTERVAL = 1000L // Broadcast at most every 1000ms
+
     // Send heart rate to all connected clients
     fun broadcastHeartRate(heartRate: Int) {
-        if (!isRunning || connectedClients.isEmpty()) {
-            // No need to log - this is expected when no clients are connected
-            return
-        }
-
-        // Only send heart rate if it changed
-        if (heartRate != lastHeartRate) {
-            val messageHeartRate = "0|$heartRate"
-            sendToAllClients(messageHeartRate)
-            lastHeartRate = heartRate
+        if (!isRunning) return
+        
+        heartRateBuffer.add(heartRate)
+        val currentTime = System.currentTimeMillis()
+        
+        // Only broadcast if we have connected clients and enough time has passed
+        // or if the heart rate has changed significantly
+        if (connectedClients.isNotEmpty() && 
+            (currentTime - lastBroadcastTime > BROADCAST_INTERVAL || 
+             Math.abs(heartRate - lastHeartRate) > 10)) {
+            
+            // Use the most recent heart rate
+            val latestRate = heartRateBuffer.lastOrNull() ?: heartRate
+            heartRateBuffer.clear()
+            
+            if (latestRate != lastHeartRate) {
+                val messageHeartRate = "0|$latestRate"
+                sendToAllClients(messageHeartRate)
+                lastHeartRate = latestRate
+                lastBroadcastTime = currentTime
+            }
         }
 
         // Check if it's time to update battery percentage (once per minute)
-        val currentTime = System.currentTimeMillis()
         if (currentTime - lastBatteryUpdate >= BATTERY_UPDATE_INTERVAL) {
             val batteryPercentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             
