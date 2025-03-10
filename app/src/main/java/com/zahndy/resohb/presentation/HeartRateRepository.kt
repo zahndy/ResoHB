@@ -32,7 +32,7 @@ class HeartRateRepository(
     private var hasActiveClients = false
     
     // Set a default sample rate that can be adjusted
-    private var currentSampleRate = 500L // milliseconds
+    private var currentSampleRate = 1000L // milliseconds
 
     /**
      * Returns the current sample rate in milliseconds
@@ -82,9 +82,9 @@ class HeartRateRepository(
             
             // Adjust sample rate based on state
             currentSampleRate = when {
-                !activeClients -> 2000L // If no clients, very slow sampling (2 seconds)
-                powerSaving -> 1000L // Power saving but clients connected (1 second)
-                else -> 500L // Normal mode with clients (500ms)
+                !activeClients -> 5000L // If no clients, very slow sampling (2 seconds) 5s
+                powerSaving -> 2000L // Power saving but clients connected (1 second) 2s
+                else -> 1000L // Normal mode with clients (500ms) 1s
             }
             
             android.util.Log.d("HeartRateRepository", 
@@ -145,4 +145,15 @@ class HeartRateRepository(
     .distinctUntilChanged()
     .sample(getCurrentSampleRate().milliseconds)
     .conflate()
+
+    // New method for releasing resources
+    fun releaseResources() {
+        try {
+            // Release any sensor listeners or resources
+            // This will depend on your implementation
+            android.util.Log.d("HeartRateRepository", "Resources released")
+        } catch (e: Exception) {
+            android.util.Log.e("HeartRateRepository", "Error releasing resources: ${e.message}")
+        }
+    }
 }

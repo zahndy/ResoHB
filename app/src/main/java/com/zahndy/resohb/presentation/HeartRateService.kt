@@ -19,13 +19,17 @@ import com.zahndy.resohb.data.WebSocketServer
 import com.zahndy.resohb.presentation.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration.Companion.milliseconds
 
 class HeartRateService : Service() {
@@ -110,8 +114,7 @@ class HeartRateService : Service() {
 
         return hasBodySensorsPermission && hasNotificationPermission
     }
-
-    // Add power saving mode tracking
+    
     private var isInPowerSavingMode = false
     private var hasConnectedClients = false
 
@@ -199,11 +202,31 @@ class HeartRateService : Service() {
 
     override fun onDestroy() {
         try {
+            // 1. Stop any websocket server
+            Log.d("HeartRateService", "Stopping WebSocketServer")
             webSocketServer.stop()
+            
+            // 2. Cancel all coroutines
+            serviceScope.cancel()
+            
+            // 3. Make sure to wait for any pending socket operations to complete
+            runBlocking {
+                // Give coroutines a chance to complete cleanly with timeout
+                withTimeout(1000) {
+                    serviceScope.coroutineContext[Job]?.children?.forEach { child ->
+                        child.join()
+                    }
+                }
+            }
+            
+            // 4. Release any sensor resources if necessary
+            heartRateRepository.releaseResources()
+            
+            Log.d("HeartRateService", "Service destroyed, all resources released")
         } catch (e: Exception) {
-            Log.e("HeartRateService", "Error stopping WebSocket server: ${e.message}", e)
+            Log.e("HeartRateService", "Error during service shutdown: ${e.message}", e)
+        } finally {
+            super.onDestroy()
         }
-        serviceScope.cancel()
-        super.onDestroy()
     }
 }

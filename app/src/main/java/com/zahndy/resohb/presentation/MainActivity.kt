@@ -9,8 +9,14 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -28,7 +34,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +51,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
@@ -79,10 +85,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         setTheme(android.R.style.Theme_DeviceDefault)
+
+        // Initialize connectivity manager
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        // Force stop any existing service without checking
+        val serviceIntent = Intent(this, HeartRateService::class.java)
+        stopService(serviceIntent)
+        _isServiceRunning.value = false
+
+        // Add a delay before proceeding to ensure port is released
+        Handler(Looper.getMainLooper()).postDelayed({
+            Log.d("MainActivity", "Existing service should be stopped, proceeding with app initialization")
+            // Rest of your initialization, if needed
+        }, 500)
 
         setContent {
             // Get saved port from SharedPreferences
@@ -124,8 +147,8 @@ class MainActivity : ComponentActivity() {
             for (intf in interfaces) {
                 val addrs = Collections.list(intf.inetAddresses)
                 for (addr in addrs) {
-                    if (!addr.isLoopbackAddress && addr.hostAddress?.contains(':') == false) {
-                        return addr.hostAddress
+                    if (!addr.isLoopbackAddress && addr.hostAddress?.contains(':') == false && addr.hostAddress != null) {
+                        return addr.hostAddress!!
                     }
                 }
             }
@@ -135,7 +158,16 @@ class MainActivity : ComponentActivity() {
         return "127.0.0.1" // Fallback to localhost
     }
 
+
     private fun startHeartRateMonitoring() {
+        // Ensure the service is stopped first to free up the port
+        stopHeartRateService()
+
+        // Increase the delay to ensure socket fully closes
+        Handler(Looper.getMainLooper()).postDelayed({
+            // Request Wi-Fi connectivity first
+            requestWifiConnectivity()
+
         val permissions = mutableListOf(
             Manifest.permission.BODY_SENSORS,
             Manifest.permission.BODY_SENSORS_BACKGROUND,
@@ -147,15 +179,16 @@ class MainActivity : ComponentActivity() {
             }
         }.toTypedArray()
 
-        // Check if permissions are already granted
-        if (permissions.all {
-                ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-            }) {
-            startHeartRateService()
-        } else {
-            // Request permissions
-            requestPermissionLauncher.launch(permissions)
-        }
+            // Check if permissions are already granted
+            if (permissions.all {
+                    ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+                }) {
+                startHeartRateService()
+            } else {
+                // Request permissions
+                requestPermissionLauncher.launch(permissions)
+            }
+        }, 500) // Increased delay from 200 to 500ms
     }
 
     private fun startHeartRateService() {
@@ -177,11 +210,89 @@ class MainActivity : ComponentActivity() {
         _isServiceRunning.value = true
     }
 
-    // Add a method to stop the heart rate service
     private fun stopHeartRateService() {
         val serviceIntent = Intent(this, HeartRateService::class.java)
         stopService(serviceIntent)
         _isServiceRunning.value = false
+
+        // Release Wi-Fi network
+        releaseWifiConnectivity()
+
+        // Add a delay before allowing restart to ensure port is released
+        Handler(Looper.getMainLooper()).postDelayed({
+            // The port should be released now
+            Log.d("MainActivity", "Socket port should be released now")
+        }, 300)
+    }
+
+    private fun requestWifiConnectivity() {
+        // Create a network callback
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                super.onAvailable(network)
+                // Wi-Fi network has been acquired, bind it to use this network by default
+                connectivityManager?.bindProcessToNetwork(network)
+                Log.d("MainActivity", "Wi-Fi network available and bound to process")
+
+                // After Wi-Fi is available, we can proceed with checking permissions
+                // The actual service start happens after permissions check
+            }
+
+            override fun onLost(network: Network) {
+                super.onLost(network)
+                Log.d("MainActivity", "Wi-Fi network lost")
+                // Optionally handle network loss scenario
+            }
+        }
+
+        // Store the callback so we can unregister it later
+        networkCallback = callback
+
+        // Request Wi-Fi network
+        try {
+            connectivityManager?.requestNetwork(
+                NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .build(),
+                callback
+            )
+            Log.d("MainActivity", "Requested Wi-Fi network")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error requesting Wi-Fi network: ${e.message}", e)
+            // Continue with permission check even if Wi-Fi request failed
+        }
+    }
+
+    private fun releaseWifiConnectivity() {
+        try {
+            // Unbind from Wi-Fi network
+            connectivityManager?.bindProcessToNetwork(null)
+
+            // Unregister the network callback
+            networkCallback?.let {
+                connectivityManager?.unregisterNetworkCallback(it)
+                networkCallback = null
+            }
+
+            Log.d("MainActivity", "Released Wi-Fi network")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error releasing Wi-Fi network: ${e.message}", e)
+        }
+    }
+
+    override fun onDestroy() {
+        // Make sure to release Wi-Fi when activity is destroyed
+        releaseWifiConnectivity()
+        super.onDestroy()
+    }
+
+    // Make sure to unregister callbacks in onPause/onStop to avoid leaks
+    override fun onStop() {
+        // If the app is being force-closed, make sure to stop the service
+        if (isFinishing) {
+            stopHeartRateService()
+        }
+        super.onStop()
     }
 }
 
@@ -196,22 +307,21 @@ fun WearApp(
     var port by remember { mutableStateOf(serverPort.toString()) }
     val listState = rememberScalingLazyListState()
 
-    // Format connection string for display
     val connectionAddress = "ws://$deviceIpAddress:$serverPort"
 
     Reso_Theme {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 0.dp)
+                .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 0.dp)
                 .background(MaterialTheme.colors.background),
             contentAlignment = Alignment.Center,
         ) {
             ScalingLazyColumn(
                 modifier = Modifier.fillMaxSize()
-                    .padding(top = 0.dp),
+                    .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 2.dp),
                 state = listState,
-                contentPadding = PaddingValues(0.dp),
+                contentPadding = PaddingValues(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 item {
@@ -240,11 +350,17 @@ fun WearApp(
 
                 if (isServiceRunning) {
                     item {
+                        Spacer(
+                            modifier = Modifier.height(2.dp)
+                        )
+                    }
+                    item {
                         Text(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 0.dp),
+                                .padding(horizontal = 0.dp, vertical = 0.dp),
                             textAlign = TextAlign.Center,
+                            fontSize = 14.sp,
                             color = MaterialTheme.colors.secondary,
                             text = "Client should connect to:"
                         )
@@ -254,11 +370,16 @@ fun WearApp(
                         Text(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                                .padding(horizontal = 10.dp, vertical = 0.dp),
                             textAlign = TextAlign.Center,
-                            fontSize = 10.sp,
+                            fontSize = 13.sp,
                             color = MaterialTheme.colors.primary,
                             text = connectionAddress
+                        )
+                    }
+                    item {
+                        Spacer(
+                            modifier = Modifier.height(10.dp)
                         )
                     }
                 }
@@ -276,20 +397,25 @@ fun WearApp(
                 }
 
                 item {
-                    TextField(
+                    OutlinedTextField (
                         value = port,
                         onValueChange = {
                             port = it
                             onPortChange(it)
                         },
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(47.dp)
-                            .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 2.dp),
-                        shape = RoundedCornerShape(23.dp),
-                        textStyle = TextStyle(textAlign = TextAlign.Center),
+                            .width(110.dp)
+                            .height(50.dp)
+                            .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 0.dp),
+                        shape = RoundedCornerShape(25.dp),
+                        textStyle = TextStyle(textAlign = TextAlign.Center,color = MaterialTheme.colors.primaryVariant, fontSize = 19.sp),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                }
+                item {
+                    Spacer(
+                        modifier = Modifier.height(4.dp)
                     )
                 }
             }

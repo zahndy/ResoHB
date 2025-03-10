@@ -21,11 +21,10 @@ class WebSocketServer(
     private val batteryManager by lazy {
         context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
     }
-    
-    // Add adaptive interval tracking
+
     private var lastHeartRate = -1
     private var lastBatteryPercentage = -1
-    private var lastBatteryCharging = false // Add tracking for last charging state
+    private var lastBatteryCharging = false // tracking for last charging state
     private var lastBatteryUpdate = 0L
     private val BATTERY_UPDATE_INTERVAL = 60_000L // Only update battery every minute
 
@@ -34,13 +33,12 @@ class WebSocketServer(
         if (isRunning) return
         
         try {
-            server = InternalWebSocketServer(InetSocketAddress(port))
-            // Add these two options to help with socket reuse
-            server?.isReuseAddr = true
-            server?.isTcpNoDelay = true
-            
-            // Lower the server connection read timeout when idle
-            server?.connectionLostTimeout = 60 // 60 seconds
+            // Add explicit socket options to help with address reuse
+            server = InternalWebSocketServer(InetSocketAddress(port)).apply {
+                isReuseAddr = true
+                isTcpNoDelay = true
+                connectionLostTimeout = 60 // 60 seconds timeout
+            }
             
             server?.start()
             isRunning = true
@@ -48,19 +46,40 @@ class WebSocketServer(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start WebSocket server: ${e.message}", e)
             isRunning = false
+            server = null
         }
     }
 
     // Stop the server
     fun stop() {
         try {
+            // First mark server as not running to prevent new operations
+            isRunning = false
+            
             // Use a more graceful shutdown with timeout
             server?.stop(1000) // 1000ms timeout
-            isRunning = false
+            
+            // Close all client connections
+            connectedClients.forEach { session ->
+                try {
+                    session.close()
+                } catch (e: Exception) {
+                    Log.e("WebSocketServer", "Error closing client session: ${e.message}")
+                }
+            }
+            connectedClients.clear()
+            
+            // Add explicit release of resources
+            server = null
+            
+            // Add a small delay to ensure socket is fully closed
+            Thread.sleep(100)
+            
             Log.d(TAG, "WebSocket server stopped")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping WebSocket server: ${e.message}", e)
         } finally {
+            // Ensure server reference is cleared even if exception occurs
             server = null
         }
     }
@@ -111,6 +130,7 @@ class WebSocketServer(
     private fun sendToAllClients(message: String) {
         try {
             for (client in connectedClients) {
+                //Log.d(TAG, "Sent Message To Client: $message")
                 client.send(message)
             }
         } catch (e: Exception) {
