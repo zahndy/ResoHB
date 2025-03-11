@@ -98,7 +98,7 @@ class HeartRateRepository(
     }
 
     private var lastHeartRate = -1
-    private val heartRateThreshold = 3 // Only report changes of 3+ BPM
+    private val heartRateThreshold = 1 // Only report changes of 1+ BPM
 
     fun heartRateFlow(): Flow<Int> = callbackFlow {
         val callback = object : MeasureCallback {
