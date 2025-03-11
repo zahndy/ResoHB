@@ -100,9 +100,9 @@ class WebSocketServer(
         val currentTime = System.currentTimeMillis()
         
         // Only broadcast if we have connected clients and enough time has passed
-        // or if the heart rate has changed
+        // and if the heart rate has changed
         if (connectedClients.isNotEmpty() && 
-            (currentTime - lastBroadcastTime > BROADCAST_INTERVAL || 
+            (currentTime - lastBroadcastTime > BROADCAST_INTERVAL &&
              Math.abs(heartRate - lastHeartRate) > 1)) {
             
             // Use the most recent heart rate
