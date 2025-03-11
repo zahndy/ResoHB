@@ -13,10 +13,10 @@ import java.util.concurrent.TimeUnit
 
 class WebSocketClient(serverUrl: String) {
     private val TAG = "WebSocketClient"
-    
+
     // Ensure the serverUrl has the proper protocol prefix
     private val serverUrl = formatUrl(serverUrl)
-    
+
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)  // No timeout for reading
         .connectTimeout(10, TimeUnit.SECONDS)   // Add connect timeout
@@ -93,7 +93,7 @@ class WebSocketClient(serverUrl: String) {
             val request = Request.Builder()
                 .url(serverUrl)
                 .build()
-            
+
             webSocket = client.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     super.onOpen(webSocket, response)
@@ -125,10 +125,10 @@ class WebSocketClient(serverUrl: String) {
                 }
 
                 // Called when a WebSocket message is received
-               // override fun onMessage(webSocket: WebSocket, text: String) {
-                    //super.onMessage(webSocket, text)
-                    // We could handle server messages here if needed
-                    //Log.d(TAG, "Message received: $text")
+                // override fun onMessage(webSocket: WebSocket, text: String) {
+                //super.onMessage(webSocket, text)
+                // We could handle server messages here if needed
+                //Log.d(TAG, "Message received: $text")
                 //}
             })
         } catch (e: Exception) {
@@ -143,12 +143,12 @@ class WebSocketClient(serverUrl: String) {
     fun sendHeartRate(heartRate: Int) {
         // Log connection state
         Log.d(TAG, "sendHeartRate called with connection status: isConnected=$isConnected, webSocket=${webSocket != null}")
-        
+
         // If not connected, try to reconnect first
         if (!isConnected && !isManuallyDisconnected) {
             Log.d(TAG, "Not connected, attempting to reconnect before sending heart rate")
             scheduleReconnect(immediate = true)
-            
+
             // Since reconnection is asynchronous, we'll try to send the data anyway
             // If the connection succeeds in the future, the next heart rate will be sent properly
         }
@@ -156,9 +156,6 @@ class WebSocketClient(serverUrl: String) {
         // Send message if we have a WebSocket even if isConnected flag is false (might be a race condition)
         if (webSocket != null) {
             try {
-                // Simple data format for transmitting heart rate and battery info
-                val batteryPct: Float = 99f;
-                val isCharging: Boolean = false;
 
                 val message = "0|$heartRate" //,bat=$batteryPct,bat_charging=$isCharging              BPM=0 BAT=1 bat_charging=3
                 val sent = webSocket?.send(message)
@@ -201,7 +198,7 @@ class WebSocketClient(serverUrl: String) {
             } else {
                 Log.d(TAG, "Immediate reconnection requested")
             }
-            
+
             // Check if we need to reconnect
             if (!isManuallyDisconnected) {
                 Log.d(TAG, "Attempting to reconnect...")
