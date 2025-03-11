@@ -439,12 +439,12 @@ fun WearApp(
                             onUrlChange(it)
                         },
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .width(180.dp)
                             .fillMaxHeight()
-                            .height(47.dp)
+                            .height(50.dp)
                             .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 0.dp),
-                        shape = RoundedCornerShape(23.dp),
-                        textStyle = TextStyle(textAlign = TextAlign.Center),
+                        shape = RoundedCornerShape(25.dp),
+                        textStyle = TextStyle(textAlign = TextAlign.Center,color = MaterialTheme.colors.primaryVariant, fontSize = 15.sp),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
                     )

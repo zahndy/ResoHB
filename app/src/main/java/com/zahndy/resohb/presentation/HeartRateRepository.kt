@@ -16,23 +16,26 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import java.lang.reflect.Method
-import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.runBlocking
 
 class HeartRateRepository(
     context: Context
 ) {
     private val healthClient = HealthServices.getClient(context)
     private val measureClient = healthClient.measureClient
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Track power mode to adjust sample rate
     private var isPowerSavingMode = false
-    private var hasActiveConnection = false
+    private var isConnected = false
     private var currentNetworkType = "Unknown"
+    private var currentCallback: MeasureCallback? = null
 
     // Set a default sample rate that can be adjusted
     private var currentSampleRate = 1000L // milliseconds
@@ -79,9 +82,9 @@ class HeartRateRepository(
      * Sets the power and client state to adjust sampling behavior
      */
     fun updatePowerState(powerSaving: Boolean, activeConnection: Boolean, networkType: String = "Unknown") {
-        if (isPowerSavingMode != powerSaving || hasActiveConnection != activeConnection || currentNetworkType != networkType) {
+        if (isPowerSavingMode != powerSaving || isConnected != activeConnection || currentNetworkType != networkType) {
             isPowerSavingMode = powerSaving
-            hasActiveConnection = activeConnection
+            isConnected = activeConnection
             currentNetworkType = networkType
 
             // Adjust sample rate based on state
@@ -126,12 +129,10 @@ class HeartRateRepository(
                     }
                 }
             }
-        }
-        // Use another coroutine to register the callback
-        CoroutineScope(Dispatchers.IO).launch {
+        }.also { currentCallback = it }
+
+        repositoryScope.launch {
             try {
-                // This is a more power-efficient approach if the API supports it
-                // Direct registration without custom sample rate for compatibility
                 measureClient.registerMeasureCallback(
                     DataType.HEART_RATE_BPM,
                     callback
@@ -143,12 +144,14 @@ class HeartRateRepository(
             }
         }
 
-        // Clean up when the flow collection ends
         awaitClose {
-            CoroutineScope(Dispatchers.IO).launch {
+            repositoryScope.launch {
                 try {
-                    measureClient.unregisterMeasureCallback(DataType.HEART_RATE_BPM, callback)
-                    android.util.Log.d("HeartRateRepository", "Unregistered heart rate callback")
+                    currentCallback?.let { callback ->
+                        measureClient.unregisterMeasureCallback(DataType.HEART_RATE_BPM, callback)
+                        currentCallback = null
+                        android.util.Log.d("HeartRateRepository", "Unregistered heart rate callback")
+                    }
                 } catch (e: Exception) {
                     android.util.Log.e("HeartRateRepository", "Error unregistering callback", e)
                 }
@@ -163,8 +166,13 @@ class HeartRateRepository(
     // New method for releasing resources
     fun releaseResources() {
         try {
-            // Release any sensor listeners or resources
-            // This will depend on your implementation
+            runBlocking {
+                currentCallback?.let { callback ->
+                    measureClient.unregisterMeasureCallback(DataType.HEART_RATE_BPM, callback)
+                    currentCallback = null
+                }
+            }
+            repositoryScope.cancel()
             android.util.Log.d("HeartRateRepository", "Resources released")
         } catch (e: Exception) {
             android.util.Log.e("HeartRateRepository", "Error releasing resources: ${e.message}")

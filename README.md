@@ -8,7 +8,7 @@ This is a drop-in replacement for LynxVR.
 
 setup:
 - adb pair the watch
-- install the app with adb install ResoHBS.apk
+- install the app with adb install ResoHB.apk
 - give the app permissions and turn off Pause App Activity, you will find Permissions after long pressing on the app in the app list
 - open the app
 - enter the address of the computer running WebSocketForNeos

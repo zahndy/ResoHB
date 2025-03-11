@@ -1,8 +1,7 @@
 package com.zahndy.resohb.data
 
-import android.content.SharedPreferences
-import android.os.Handler
-import android.os.Looper
+import android.content.Context
+import android.os.BatteryManager
 import android.util.Log
 import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
@@ -10,14 +9,11 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import java.net.InetAddress
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
-class WebSocketClient(serverUrl: String) {
+class WebSocketClient(private val serverUrl : String, private val context: Context) {
     private val TAG = "WebSocketClient"
-    
-    // Ensure the serverUrl has the proper protocol prefix
-    private val serverUrl = formatUrl(serverUrl)
     
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)  // No timeout for reading
@@ -25,47 +21,26 @@ class WebSocketClient(serverUrl: String) {
         .build()
     private var webSocket: WebSocket? = null
     private var isConnected = false
+    val isConnectionActive: Boolean
+        get() = isConnected
+
+    private val batteryManager by lazy {
+        context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+    }
+    private var lastHeartRate = -1
+    private var lastBatteryPercentage = -1
+    private var lastBatteryCharging = false // tracking for last charging state
+    private var lastBatteryUpdate = 0L
+    private val batteryUpdateInterval = 60_000L // Only update battery every minute
+    private var heartRateBuffer = mutableListOf<Int>()
+    private var lastBroadcastTime = 0L
+    private val messageInterval = 1000L
+
     private var reconnectJob: Job? = null
-    private val mainHandler = Handler(Looper.getMainLooper())
     private var reconnectAttempt = 0
     private val maxReconnectDelay = 30_000L // Max delay of 30 seconds
     private val maxReconnectAttempts = 10 // Maximum number of reconnection attempts
     private var isManuallyDisconnected = false
-
-    // Format URL to ensure it uses HTTP protocol for the WebSocket
-    private fun formatUrl(url: String): String {
-        // First trim any whitespace
-        val trimmedUrl = url.trim()
-
-        val formattedUrl = if (trimmedUrl.startsWith("ws://") || trimmedUrl.startsWith("wss://")) {
-            trimmedUrl
-        } else if (trimmedUrl.startsWith("http://")) {
-            trimmedUrl.replace("http://", "ws://")
-        } else if (trimmedUrl.startsWith("https://")) {
-            trimmedUrl.replace("https://", "wss://")
-        } else {
-            "ws://$trimmedUrl"
-        }
-
-        // Use a different approach to validate the URL
-        try {
-            // Convert ws:// to http:// just for validation purposes
-            val validationUrl = formattedUrl.replace("ws://", "http://").replace("wss://", "https://")
-            java.net.URL(validationUrl) // This will throw if the URL structure is invalid
-            Log.d(TAG, "Formatted URL from '$url' to '$formattedUrl' - valid: true")
-            return formattedUrl
-        } catch (e: Exception) {
-            Log.e(TAG, "Invalid WebSocket URL: $formattedUrl", e)
-            // If URL is invalid, try adding a default port
-            val withDefaultPort = if (formattedUrl.contains(":")) {
-                formattedUrl
-            } else {
-                "$formattedUrl:9555"
-            }
-            Log.d(TAG, "Trying with default port: $withDefaultPort")
-            return withDefaultPort
-        }
-    }
 
     // Calculate exponential backoff delay
     private fun getReconnectDelay(): Long {
@@ -79,6 +54,86 @@ class WebSocketClient(serverUrl: String) {
         }
         Log.d(TAG, "Reconnect attempt $reconnectAttempt with delay $delay ms")
         return delay
+    }
+
+    private val messageQueue = mutableListOf<String>()
+    private val queueLock = Object()
+    private val clientScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Send heart rate data
+    fun sendHeartRate(heartRate: Int) {
+        val message = "0|$heartRate"
+
+        if (!isConnected) {
+            synchronized(queueLock) {
+                // Queue message if disconnected (limit queue size to prevent memory issues)
+                if (messageQueue.size < 100) {
+                    messageQueue.add(message)
+                    Log.d(TAG, "Message queued while disconnected")
+                }
+            }
+            if (!isManuallyDisconnected) {
+                scheduleReconnect(immediate = true)
+            }
+            return
+        }
+
+        heartRateBuffer.add(heartRate)
+        val currentTime = System.currentTimeMillis()
+
+        // Only send if enough time has passed
+        // or if the heart rate has changed
+        if ((currentTime - lastBroadcastTime > messageInterval || abs(heartRate - lastHeartRate) > 1)) {
+            // Use the most recent heart rate
+            val latestRate = heartRateBuffer.lastOrNull() ?: heartRate
+            heartRateBuffer.clear()
+
+            if (latestRate != lastHeartRate) {
+                val messageHeartRate = "0|$latestRate"
+                sendMessage(messageHeartRate)
+                lastHeartRate = latestRate
+                lastBroadcastTime = currentTime
+            }
+        }
+
+        // Check if it's time to update battery percentage (once per minute)
+        if (currentTime - lastBatteryUpdate >= batteryUpdateInterval) {
+            val batteryPercentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+
+            // Only send battery percentage if it changed
+            if (batteryPercentage != lastBatteryPercentage) {
+                sendMessage("1|$batteryPercentage")
+                lastBatteryPercentage = batteryPercentage
+            }
+
+            lastBatteryUpdate = currentTime
+        }
+
+        // Check charging status on every heart rate update, independent of timer
+        val isCharging = batteryManager.isCharging
+        if (isCharging != lastBatteryCharging) {
+            sendMessage("2|$isCharging")
+            lastBatteryCharging = isCharging
+        }
+    }
+
+    private fun sendMessage(message: String) {
+        webSocket?.let { ws ->
+            try {
+                val sent = ws.send(message)
+                if (!sent) {
+                    synchronized(queueLock) {
+                        if (messageQueue.size < 100) {
+                            messageQueue.add(message)
+                        }
+                    }
+                }
+            } catch(e: Exception) {
+                Log.e(TAG, "WebSocket exception when sending data: ${e.message}", e)
+                isConnected = false
+                scheduleReconnect()
+            }
+        }
     }
 
     // Initialize connection
@@ -102,6 +157,14 @@ class WebSocketClient(serverUrl: String) {
                     isConnected = true
                     reconnectAttempt = 0 // Reset reconnect attempts on successful connection
                     Log.d(TAG, "WebSocket connection established to $serverUrl")
+                   
+                    // Send any queued messages
+                    synchronized(queueLock) {
+                        messageQueue.forEach { message ->
+                            sendMessage(message)
+                        }
+                        messageQueue.clear()
+                    }
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -141,47 +204,17 @@ class WebSocketClient(serverUrl: String) {
         }
     }
 
-    // Send heart rate data
-    fun sendHeartRate(heartRate: Int) {
-        // Log connection state
-        Log.d(TAG, "sendHeartRate called with connection status: isConnected=$isConnected, webSocket=${webSocket != null}")
-        
-        // If not connected, try to reconnect first
-        if (!isConnected && !isManuallyDisconnected) {
-            Log.d(TAG, "Not connected, attempting to reconnect before sending heart rate")
-            scheduleReconnect(immediate = true)
-            
-            // Since reconnection is asynchronous, we'll try to send the data anyway
-            // If the connection succeeds in the future, the next heart rate will be sent properly
-        }
-
-        // Send message if we have a WebSocket even if isConnected flag is false (might be a race condition)
-        if (webSocket != null) {
-            try {
-                // Simple data format for transmitting heart rate and battery info
-                val batteryPct: Float = 99f;
-                val isCharging: Boolean = false;
-
-                val message = "0|$heartRate" //,bat=$batteryPct,bat_charging=$isCharging              BPM=0 BAT=1 bat_charging=3
-                val sent = webSocket?.send(message)
-                //Log.d(TAG, "Message sent result: $sent, message: $message")
-            } catch(e: Exception) {
-                Log.e(TAG, "WebSocket exception when sending data: ${e.message}", e)
-                // Mark as disconnected to force reconnection on next attempt
-                isConnected = false
-            }
-        } else {
-            Log.w(TAG, "Cannot send heart rate - WebSocket is null")
-        }
-    }
-
     // Close connection
     fun disconnect() {
         isManuallyDisconnected = true
         cancelReconnect()
+        synchronized(queueLock) {
+            messageQueue.clear()
+        }
         webSocket?.close(1000, "Closing connection")
         webSocket = null
         isConnected = false
+        clientScope.cancel()
     }
 
     // Schedule reconnection with exponential backoff
