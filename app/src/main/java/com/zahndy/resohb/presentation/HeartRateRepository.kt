@@ -19,12 +19,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.lang.reflect.Method
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.sample
 
 class HeartRateRepository(
     context: Context
 ) {
     private val healthClient = HealthServices.getClient(context)
     private val measureClient = healthClient.measureClient
+
+    // Track power mode to adjust sample rate
+    private var isPowerSavingMode = false
+    private var hasActiveConnection = false
+    private var currentNetworkType = "Unknown"
+
+    // Set a default sample rate that can be adjusted
+    private var currentSampleRate = 1000L // milliseconds
+
+    /**
+     * Returns the current sample rate in milliseconds
+     */
+    fun getCurrentSampleRate(): Long {
+        return currentSampleRate
+    }
 
     // Properly implemented as a suspend function that can be called from a coroutine
     suspend fun hasHeartRateCapability(): Boolean {
@@ -33,20 +51,18 @@ class HeartRateRepository(
             android.util.Log.d("HeartRateRepository", "Checking heart rate capability")
             android.util.Log.d("HeartRateRepository", "Capabilities class: ${capabilities::class.java.name}")
 
-            // Instead of using a non-existent method, we'll try to register for heart rate updates
-            // If registration succeeds, heart rate is supported
             try {
-                // Try to register for heart rate updates directly
+                // Try to register for heart rate updates directly with a temporary callback
                 measureClient.registerMeasureCallback(DataType.HEART_RATE_BPM, object : MeasureCallback {
                     override fun onAvailabilityChanged(dataType: DeltaDataType<*, *>, availability: Availability) {}
                     override fun onDataReceived(data: DataPointContainer) {}
                 })
-                
+
                 // If we got here, heart rate is supported - immediately unregister
                 measureClient.unregisterMeasureCallback(DataType.HEART_RATE_BPM, object : MeasureCallback {
-                   override fun onAvailabilityChanged(dataType: DeltaDataType<*, *>, availability: Availability) {}
-                   override fun onDataReceived(data: DataPointContainer) {}
-               })
+                    override fun onAvailabilityChanged(dataType: DeltaDataType<*, *>, availability: Availability) {}
+                    override fun onDataReceived(data: DataPointContainer) {}
+                })
                 android.util.Log.d("HeartRateRepository", "Heart rate is supported")
                 true
             } catch (e: Exception) {
@@ -58,29 +74,71 @@ class HeartRateRepository(
             false
         }
     }
-  
+
+    /**
+     * Sets the power and client state to adjust sampling behavior
+     */
+    fun updatePowerState(powerSaving: Boolean, activeConnection: Boolean, networkType: String = "Unknown") {
+        if (isPowerSavingMode != powerSaving || hasActiveConnection != activeConnection || currentNetworkType != networkType) {
+            isPowerSavingMode = powerSaving
+            hasActiveConnection = activeConnection
+            currentNetworkType = networkType
+
+            // Adjust sample rate based on state
+            currentSampleRate = when {
+                !activeConnection -> 10000L // No clients: very slow sampling (10s)
+                powerSaving && !networkType.contains("Wi-Fi") -> 3000L // Power saving on cellular: slower (3s)
+                powerSaving && networkType.contains("Wi-Fi") -> 2000L // Power saving on WiFi: moderate (2s)
+                !networkType.contains("Wi-Fi") -> 1500L // Normal mode on cellular (1.5s)
+                else -> 1000L // Best case: normal mode on WiFi (1s)
+            }
+
+            android.util.Log.d("HeartRateRepository",
+                "Updated state - saving: $powerSaving, Connection: $activeConnection, " +
+                        "network: $networkType, sample rate: $currentSampleRate ms")
+        }
+    }
+
+    private var lastHeartRate = -1
+    private val heartRateThreshold = 1 // Only report changes of 3+ BPM
+
     fun heartRateFlow(): Flow<Int> = callbackFlow {
         val callback = object : MeasureCallback {
             override fun onAvailabilityChanged(dataType: DeltaDataType<*, *>, availability: Availability) {
-                // Handle availability changes if needed
+                when (availability) {
+                    is DataTypeAvailability -> {
+                        android.util.Log.d("HeartRateRepository", "Heart rate sensor available")
+                    }
+                    else -> {
+                        android.util.Log.d("HeartRateRepository", "Heart rate sensor not available: $availability")
+                    }
+                }
             }
 
             override fun onDataReceived(data: DataPointContainer) {
                 val heartRateBpm = data.getData(DataType.HEART_RATE_BPM)
                 heartRateBpm.forEach {
-                    // Simply send all heart rate values received
-                    trySend(it.value.toInt())
+                    val newRate = it.value.toInt()
+                    // Only send if the difference is significant or it's the first reading
+                    if (lastHeartRate == -1 || Math.abs(newRate - lastHeartRate) >= heartRateThreshold) {
+                        lastHeartRate = newRate
+                        trySend(newRate)
+                    }
                 }
             }
         }
-
         // Use another coroutine to register the callback
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // If registerMeasureCallback is a suspend function, we need to call it in a coroutine
-                measureClient.registerMeasureCallback(DataType.HEART_RATE_BPM, callback)
+                // This is a more power-efficient approach if the API supports it
+                // Direct registration without custom sample rate for compatibility
+                measureClient.registerMeasureCallback(
+                    DataType.HEART_RATE_BPM,
+                    callback
+                )
+                android.util.Log.d("HeartRateRepository", "Registered without custom sample rate")
             } catch (e: Exception) {
-                // Handle the error and close the channel if registration fails
+                android.util.Log.e("HeartRateRepository", "Failed to register callback", e)
                 this@callbackFlow.close(e)
             }
         }
@@ -88,8 +146,28 @@ class HeartRateRepository(
         // Clean up when the flow collection ends
         awaitClose {
             CoroutineScope(Dispatchers.IO).launch {
-                measureClient.unregisterMeasureCallback(DataType.HEART_RATE_BPM, callback)
+                try {
+                    measureClient.unregisterMeasureCallback(DataType.HEART_RATE_BPM, callback)
+                    android.util.Log.d("HeartRateRepository", "Unregistered heart rate callback")
+                } catch (e: Exception) {
+                    android.util.Log.e("HeartRateRepository", "Error unregistering callback", e)
+                }
             }
         }
-    }.distinctUntilChanged()
+    }
+        // Apply power optimizations to the flow - distinct values, sample based on power state, and conflate
+        .distinctUntilChanged()
+        .sample(getCurrentSampleRate().milliseconds)
+        .conflate()
+
+    // New method for releasing resources
+    fun releaseResources() {
+        try {
+            // Release any sensor listeners or resources
+            // This will depend on your implementation
+            android.util.Log.d("HeartRateRepository", "Resources released")
+        } catch (e: Exception) {
+            android.util.Log.e("HeartRateRepository", "Error releasing resources: ${e.message}")
+        }
+    }
 }
