@@ -4,7 +4,8 @@
 # ResoHB 
 Client that sends your heartbeat to a websocket server (WebSocketForNeos)
 which can then be connected to from Resonite over localhost.
-This is a drop-in replacement for LynxVR
+This is a drop-in replacement for LynxVR.
+
 setup:
 - adb pair the watch
 - install the app with adb install ResoHBS.apk
@@ -15,6 +16,7 @@ setup:
 
 # ResoHBS 
 Server where clients like Resonite can directly connect to the watch.
+
 setup:
 - Set a Static IP in your router for your smartwatch
 - adb pair the watch
