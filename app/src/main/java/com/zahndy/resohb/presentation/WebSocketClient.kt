@@ -81,9 +81,8 @@ class WebSocketClient(private val serverUrl : String, private val context: Conte
         heartRateBuffer.add(heartRate)
         val currentTime = System.currentTimeMillis()
 
-        // Only send if enough time has passed
-        // or if the heart rate has changed
-        if ((currentTime - lastBroadcastTime > messageInterval || abs(heartRate - lastHeartRate) > 1)) {
+        // Only send if enough time has passed AND if the heart rate has changed
+        if ((currentTime - lastBroadcastTime > messageInterval && abs(heartRate - lastHeartRate) > 1)) {
             // Use the most recent heart rate
             val latestRate = heartRateBuffer.lastOrNull() ?: heartRate
             heartRateBuffer.clear()
@@ -188,13 +187,6 @@ class WebSocketClient(private val serverUrl : String, private val context: Conte
                         scheduleReconnect()
                     }
                 }
-
-                // Called when a WebSocket message is received
-               // override fun onMessage(webSocket: WebSocket, text: String) {
-                    //super.onMessage(webSocket, text)
-                    // We could handle server messages here if needed
-                    //Log.d(TAG, "Message received: $text")
-                //}
             })
         } catch (e: Exception) {
             Log.e(TAG, "Exception creating WebSocket: ${e.message}", e)
