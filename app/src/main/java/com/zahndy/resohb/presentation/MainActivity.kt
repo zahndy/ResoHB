@@ -8,6 +8,7 @@ package com.zahndy.resohb.presentation
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
@@ -174,24 +175,59 @@ class MainActivity : ComponentActivity() {
 
 
     private fun startHeartRateMonitoring() {
-        // Ensure the service is stopped first to free up the port
-        stopHeartRateService()
+        // First check if service is actually running
+        if (isServiceRunning) {
+            Log.d("MainActivity", "Service is already running, stopping first")
+            stopHeartRateService()
 
-        // Increase the delay to ensure socket fully closes
-        Handler(Looper.getMainLooper()).postDelayed({
-            // Request Wi-Fi connectivity first
+            // Add a state variable to track that we want to restart
+            val pendingRestart = true
+
+            // Set up a receiver to know when the service has actually stopped
+            val filter = IntentFilter("com.zahndy.resohb.SERVICE_STOPPED")
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    if (pendingRestart) {
+                        requestWifiConnectivity()
+                        val permissions = mutableListOf(
+                            Manifest.permission.BODY_SENSORS,
+                            Manifest.permission.BODY_SENSORS_BACKGROUND,
+                            Manifest.permission.FOREGROUND_SERVICE_HEALTH
+                        ).apply {
+                            // Add notification permission for Android 13+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                add(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }.toTypedArray()
+
+                        // Check if permissions are already granted
+                        if (permissions.all {
+                                ContextCompat.checkSelfPermission(this@MainActivity, it) == PackageManager.PERMISSION_GRANTED
+                            }) {
+                            startHeartRateService()
+                        } else {
+                            // Request permissions
+                            requestPermissionLauncher.launch(permissions)
+                        }
+                    }
+                    unregisterReceiver(this)
+                }
+            }
+            registerReceiver(receiver, filter)
+        } else {
+            // Service isn't running, we can start directly
             requestWifiConnectivity()
 
-        val permissions = mutableListOf(
-            Manifest.permission.BODY_SENSORS,
-            Manifest.permission.BODY_SENSORS_BACKGROUND,
-            Manifest.permission.FOREGROUND_SERVICE_HEALTH
-        ).apply {
-            // Add notification permission for Android 13+
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }.toTypedArray()
+            val permissions = mutableListOf(
+                Manifest.permission.BODY_SENSORS,
+                Manifest.permission.BODY_SENSORS_BACKGROUND,
+                Manifest.permission.FOREGROUND_SERVICE_HEALTH
+            ).apply {
+                // Add notification permission for Android 13+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }.toTypedArray()
 
             // Check if permissions are already granted
             if (permissions.all {
@@ -202,7 +238,7 @@ class MainActivity : ComponentActivity() {
                 // Request permissions
                 requestPermissionLauncher.launch(permissions)
             }
-        }, 500) // Increased delay from 200 to 500ms
+        }
     }
 
     private fun startHeartRateService() {
@@ -232,15 +268,15 @@ class MainActivity : ComponentActivity() {
         // Release Wi-Fi network
         releaseWifiConnectivity()
 
-        // Add a delay before allowing restart to ensure port is released
-        Handler(Looper.getMainLooper()).postDelayed({
-            // The port should be released now
-            Log.d("MainActivity", "Socket port should be released now")
-        }, 300)
+        // Send broadcast to signal the service has stopped
+        sendBroadcast(Intent("com.zahndy.resohb.SERVICE_STOPPED"))
     }
 
     private fun requestWifiConnectivity() {
-        // Create a network callback
+        // First release any existing callback to prevent leaks
+        releaseWifiConnectivity()
+
+        // Create a new network callback
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 super.onAvailable(network)

@@ -155,8 +155,8 @@ class HeartRateRepository(
         }
     }
     // Apply power optimizations to the flow - distinct values, sample based on power state, and conflate
-    .distinctUntilChanged()
-    .sample(getCurrentSampleRate().milliseconds)
+    .distinctUntilChanged() 
+    .sample(getCurrentSampleRate().milliseconds) 
     .conflate()
 
     // New method for releasing resources

@@ -9,7 +9,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.zahndy.resohb"
+        applicationId = "com.zahndy.resohbs"
         minSdk = 34
         targetSdk = 34
         versionCode = 1

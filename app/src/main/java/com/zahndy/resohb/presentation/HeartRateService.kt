@@ -129,8 +129,6 @@ class HeartRateService : Service() {
             heartRateRepository.heartRateFlow()
                 // Only process distinct heart rate values
                 .distinctUntilChanged()
-                // Sample the flow based on our sample rate
-                .sample(heartRateRepository.getCurrentSampleRate().milliseconds)
                 // Use conflate to drop intermediary values if processing is slow
                 .conflate()
                 .catch { e ->

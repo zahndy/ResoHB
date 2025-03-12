@@ -28,6 +28,20 @@ class WebSocketServer(
     private var lastBatteryUpdate = 0L
     private val BATTERY_UPDATE_INTERVAL = 60_000L // Only update battery every minute
 
+    // Interface for callbacks
+    interface WebSocketServerCallback {
+        fun onServerStarted(port: Int)
+        fun onServerError(errorMessage: String)
+        fun onClientConnected(count: Int)
+        fun onClientDisconnected(count: Int)
+    }
+
+    private var callback: WebSocketServerCallback? = null
+
+    fun setCallback(callback: WebSocketServerCallback?) {
+        this.callback = callback
+    }
+
     // Start the server
     fun start() {
         if (isRunning) return
@@ -42,11 +56,14 @@ class WebSocketServer(
             
             server?.start()
             isRunning = true
+            callback?.onServerStarted(port)
             Log.d(TAG, "WebSocket server started on port $port")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start WebSocket server: ${e.message}", e)
+            val errorMsg = "Failed to start WebSocket server: ${e.message}"
+            Log.e(TAG, errorMsg, e)
             isRunning = false
             server = null
+            callback?.onServerError(errorMsg)
         }
     }
 
