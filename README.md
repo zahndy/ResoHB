@@ -27,4 +27,4 @@ setup:
 - open the app 
 - hit start and it should show you the address to connect to
 - In Resonite set the WebsocketClient URL to the address displayed on the watch
-- it might take a while to connect based on your watch's connectivity 
+- it might take a moment to connect based on your watch's connectivity 
