@@ -120,6 +120,7 @@ class HeartRateService : Service() {
     private var isInPowerSavingMode = false
     private var hasConnectedClients = false
     private var currentNetworkType = "Unknown"
+    private var clientCount = 0
 
     private fun collectHeartRate() {
         serviceScope.launch {
@@ -251,4 +252,5 @@ class HeartRateService : Service() {
             super.onDestroy()
         }
     }
+
 }

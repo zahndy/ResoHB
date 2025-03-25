@@ -26,10 +26,10 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,7 +43,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
@@ -56,14 +55,25 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.rotary.onRotaryScrollEvent
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.ScalingLazyColumnDefaults
+import androidx.wear.compose.material.PositionIndicator
+import androidx.wear.compose.material.Scaffold
 import androidx.wear.tooling.preview.devices.WearDevices
 import com.zahndy.resohb.R
 import com.zahndy.resohb.presentation.theme.Reso_Theme
 import com.zahndy.resohb.service.HeartRateService
+import kotlinx.coroutines.launch
 import java.net.NetworkInterface
 import java.util.Collections
 
@@ -80,6 +90,9 @@ class MainActivity : ComponentActivity() {
 
     private val _networkStatus = mutableStateOf("Unknown")
     val networkStatus get() = _networkStatus.value
+
+    private val _connectedClients = mutableStateOf(0)
+    val connectedClients get() = _connectedClients.value
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -120,6 +133,10 @@ class MainActivity : ComponentActivity() {
             // Rest of your initialization, if needed
         }, 500)
 
+        // Register broadcast receiver to get client connection updates
+        val clientUpdateFilter = IntentFilter("com.zahndy.resohb.CLIENTS_UPDATED")
+        registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
+
         setContent {
             // Get saved port from SharedPreferences
             val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -150,7 +167,8 @@ class MainActivity : ComponentActivity() {
                         // Invalid port format, ignore
                     }
                 },
-                networkStatus = networkStatus
+                networkStatus = networkStatus,
+                connectedClients = connectedClients
             )
         }
         requestBatteryOptimizationExemption()
@@ -210,10 +228,12 @@ class MainActivity : ComponentActivity() {
                             requestPermissionLauncher.launch(permissions)
                         }
                     }
+
                     unregisterReceiver(this)
                 }
             }
-            registerReceiver(receiver, filter)
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+
         } else {
             // Service isn't running, we can start directly
             requestWifiConnectivity()
@@ -412,6 +432,12 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         // Make sure to release Wi-Fi when activity is destroyed
         releaseWifiConnectivity()
+        // Unregister the client update receiver
+        try {
+            unregisterReceiver(clientUpdateReceiver)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error unregistering client receiver: ${e.message}", e)
+        }
         super.onDestroy()
     }
 
@@ -423,6 +449,15 @@ class MainActivity : ComponentActivity() {
         }
         super.onStop()
     }
+
+    private val clientUpdateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.let {
+                val count = it.getIntExtra("clientCount", 0)
+                _connectedClients.value = count
+            }
+        }
+    }
 }
 
 @Composable
@@ -432,25 +467,47 @@ fun WearApp(
     isServiceRunning: Boolean,
     onToggleService: () -> Unit,
     onPortChange: (String) -> Unit,
-    networkStatus: String = "Unknown"
+    networkStatus: String = "Unknown",
+    connectedClients: Int = 0
 ) {
     var port by remember { mutableStateOf(serverPort.toString()) }
     val listState = rememberScalingLazyListState()
 
     val connectionAddress = "ws://$deviceIpAddress:$serverPort"
 
+    val focusRequester = remember { FocusRequester() }
+    val coroutineScope = rememberCoroutineScope()
+
+    val haptic = LocalHapticFeedback.current
+    // Add timestamp tracking for haptic feedback
+    var lastHapticFeedbackTime by remember { mutableStateOf(0L) }
+
     Reso_Theme {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 0.dp)
-                .background(MaterialTheme.colors.background),
-            contentAlignment = Alignment.Center,
+        Scaffold(
+            positionIndicator = {
+                PositionIndicator(scalingLazyListState = listState)
+            }
         ) {
             ScalingLazyColumn(
                 modifier = Modifier.fillMaxSize()
-                    .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 2.dp),
-                state = listState,
+                    .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 2.dp)
+                    .onRotaryScrollEvent {
+                        coroutineScope.launch {
+                            listState.scrollBy(it.verticalScrollPixels)
+                            
+                            // Add throttling logic for haptic feedback (500ms)
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - lastHapticFeedbackTime > 100L) {
+                                haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                                lastHapticFeedbackTime = currentTime
+                            }
+                        }
+                        true
+                    }
+                    .focusRequester(focusRequester)
+                    .focusable(),
+                state = listState, 
+                flingBehavior = ScalingLazyColumnDefaults.snapFlingBehavior(state = listState),
                 contentPadding = PaddingValues(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -500,7 +557,6 @@ fun WearApp(
                             text = "Client should connect to:"
                         )
                     }
-
                     item {
                         Text(
                             modifier = Modifier
@@ -510,6 +566,22 @@ fun WearApp(
                             fontSize = 13.sp,
                             color = MaterialTheme.colors.primary,
                             text = connectionAddress
+                        )
+                    }
+                    item {
+                        Spacer(
+                            modifier = Modifier.height(2.dp)
+                        )
+                    }
+                    item {
+                        Text(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 0.dp),
+                            textAlign = TextAlign.Center,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colors.secondary,
+                            text = "Clients: $connectedClients" //show the current amount of connected clients
                         )
                     }
                     item {
@@ -586,6 +658,9 @@ fun WearApp(
             }
         }
     }
+    LaunchedEffect(Unit){
+        focusRequester.requestFocus()
+    }
 }
 
 @Composable
@@ -607,6 +682,7 @@ fun DefaultPreview() {
         isServiceRunning = false,
         onToggleService = {},
         onPortChange = {},
-        networkStatus = "Wi-Fi"
+        networkStatus = "Wi-Fi",
+        connectedClients = 0
     )
 }
