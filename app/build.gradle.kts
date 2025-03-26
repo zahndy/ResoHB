@@ -41,7 +41,7 @@ android {
 dependencies {
 
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
-    // Update Fragment dependency to 1.3.0 or higher
+
     implementation ("androidx.fragment:fragment:1.8.6")
     implementation ("androidx.fragment:fragment-ktx:1.8.6")
     // Health Services for heart rate
