@@ -1,4 +1,4 @@
-package com.zahndy.resohb.data
+package com.zahndy.resohb.presentation
 
 import android.content.Context
 import androidx.health.services.client.HealthServices
@@ -31,23 +31,17 @@ class HeartRateRepository(
     private val measureClient = healthClient.measureClient
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // Track power mode to adjust sample rate
     private var isPowerSavingMode = false
     private var isConnected = false
     private var currentNetworkType = "Unknown"
     private var currentCallback: MeasureCallback? = null
 
-    // Set a default sample rate that can be adjusted
     private var currentSampleRate = 1000L // milliseconds
 
-    /**
-     * Returns the current sample rate in milliseconds
-     */
     fun getCurrentSampleRate(): Long {
         return currentSampleRate
     }
 
-    // Properly implemented as a suspend function that can be called from a coroutine
     suspend fun hasHeartRateCapability(): Boolean {
         return try {
             val capabilities = measureClient.getCapabilities()
@@ -78,9 +72,8 @@ class HeartRateRepository(
         }
     }
 
-    /**
-     * Sets the power and client state to adjust sampling behavior
-     */
+
+    //Set the power and client state to adjust sampling behavior
     fun updatePowerState(powerSaving: Boolean, activeConnection: Boolean, networkType: String = "Unknown") {
         if (isPowerSavingMode != powerSaving || isConnected != activeConnection || currentNetworkType != networkType) {
             isPowerSavingMode = powerSaving
@@ -103,7 +96,7 @@ class HeartRateRepository(
     }
 
     private var lastHeartRate = -1
-    private val heartRateThreshold = 1 // Only report changes of 3+ BPM
+    private val heartRateThreshold = 1 // Only report changes of BPM
 
     fun heartRateFlow(): Flow<Int> = callbackFlow {
         val callback = object : MeasureCallback {
@@ -163,7 +156,6 @@ class HeartRateRepository(
         .sample(getCurrentSampleRate().milliseconds)
         .conflate()
 
-    // New method for releasing resources
     fun releaseResources() {
         try {
             runBlocking {

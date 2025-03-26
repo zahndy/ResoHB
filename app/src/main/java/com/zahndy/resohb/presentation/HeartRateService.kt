@@ -15,8 +15,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.zahndy.resohb.R
-import com.zahndy.resohb.data.HeartRateRepository
-import com.zahndy.resohb.data.WebSocketClient
+import com.zahndy.resohb.presentation.HeartRateRepository
+import com.zahndy.resohb.presentation.WebSocketClient
 import com.zahndy.resohb.presentation.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +39,7 @@ class HeartRateService : Service() {
     private lateinit var webSocketClient: WebSocketClient
 
     // Default server URL (will be overridden by intent extra if provided)
-    private var serverUrl = "ws://192.168.1.100:8080/heartrate" // Use HTTP protocol for WebSocket
+    private var serverUrl = "ws://192.168.1.100:8080/heartrate"
 
     companion object {
         private const val NOTIFICATION_ID = 1

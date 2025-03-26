@@ -396,7 +396,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // Register receiver when activity becomes visible
         val clientUpdateFilter = IntentFilter("com.zahndy.resohb.CLIENTS_UPDATED")
-            registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
+        registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
     }
 
 }
