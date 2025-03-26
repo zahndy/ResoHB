@@ -1,5 +1,6 @@
-package com.zahndy.resohb.service
+package com.zahndy.resohb.presentation
 
+import android.app.ActivityOptions
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -15,9 +16,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.zahndy.resohb.R
-import com.zahndy.resohb.presentation.HeartRateRepository
-import com.zahndy.resohb.presentation.WebSocketClient
-import com.zahndy.resohb.presentation.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -212,9 +210,10 @@ class HeartRateService : Service() {
 
     private fun createNotification(contentText: String): Notification {
         val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
-        )
+        val activityOptions = ActivityOptions.makeBasic()
+        activityOptions.setPendingIntentCreatorBackgroundActivityStartMode (ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT + PendingIntent.FLAG_IMMUTABLE
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags, activityOptions.toBundle())
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Heart Rate Monitor")
@@ -256,19 +255,5 @@ class HeartRateService : Service() {
                 }
             }
         }
-    }
-
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        super.onTaskRemoved(rootIntent)
-        // Clean up when the app is removed from recent tasks
-        stopSelf()
-    }
-
-    // Handle low memory conditions
-    @Deprecated("Deprecated in Java")
-    override fun onLowMemory() {
-        super.onLowMemory()
-        // Reduce sample rate and clear any buffers
-        updatePowerSavingMode(forceLowPower = true)
     }
 }

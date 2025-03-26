@@ -60,7 +60,6 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.tooling.preview.devices.WearDevices
 import com.zahndy.resohb.R
 import com.zahndy.resohb.presentation.theme.Reso_Theme
-import com.zahndy.resohb.service.HeartRateService
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.focus.FocusRequester
