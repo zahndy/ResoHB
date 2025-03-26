@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.zahndy.resohb"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.zahndy.resohb"
@@ -40,17 +40,17 @@ android {
 
 dependencies {
 
-    // Update Fragment dependency to 1.3.0 or higher
-    implementation ("androidx.fragment:fragment:1.6.2") // Latest stable version
-    implementation ("androidx.fragment:fragment-ktx:1.6.2")
+
+    implementation ("androidx.fragment:fragment:1.8.6")
+    implementation ("androidx.fragment:fragment-ktx:1.8.6")
     // Health Services for heart rate
     implementation("androidx.health:health-services-client:1.1.0-alpha05")
     // WebSocket client (OkHttp)
-    implementation("com.squareup.okhttp3:okhttp:4.11.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // For background processing
-    implementation("androidx.work:work-runtime-ktx:2.8.1")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
     // For coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
 
     implementation(libs.play.services.wearable)
     implementation(platform(libs.compose.bom))

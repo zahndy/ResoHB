@@ -8,7 +8,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -28,7 +29,6 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration.Companion.milliseconds
@@ -108,13 +108,11 @@ class HeartRateService : Service() {
             BODY_SENSORS_PERMISSION
         ) == PackageManager.PERMISSION_GRANTED
 
-        var hasNotificationPermission = true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            hasNotificationPermission = ContextCompat.checkSelfPermission(
-                this,
-                android.Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-        }
+        val hasNotificationPermission: Boolean = ContextCompat.checkSelfPermission(
+            this,
+            android.Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+
 
         // Log permission status to help with debugging
         Log.d("HeartRateService", "Body sensors permission: $hasBodySensorsPermission")
@@ -123,7 +121,7 @@ class HeartRateService : Service() {
         return hasBodySensorsPermission && hasNotificationPermission
     }
     private var lastNotificationUpdate = 0L
-    private val NOTIFICATION_UPDATE_INTERVAL = 2000L // 2 seconds
+    private val notificationUpdateInterval = 2000L // 2 seconds
     private var isInPowerSavingMode = false
     private var isConnected = false
     private var currentNetworkType = "Unknown"
@@ -140,7 +138,7 @@ class HeartRateService : Service() {
                 .sample(heartRateRepository.getCurrentSampleRate().milliseconds)
                 // Use conflate to drop intermediary values if processing is slow
                 .conflate()
-                .catch { e ->
+                .catch {
                     // Handle errors
                     stopSelf()
                 }
@@ -150,7 +148,7 @@ class HeartRateService : Service() {
 
                     // Update notification less frequently to save resources
                     val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastNotificationUpdate > NOTIFICATION_UPDATE_INTERVAL) {
+                    if (currentTime - lastNotificationUpdate > notificationUpdateInterval) {
                         val isConnected = webSocketClient.isConnectionActive
 
                         // Only update notification if connected
@@ -174,11 +172,13 @@ class HeartRateService : Service() {
         val newisConnected = webSocketClient.isConnectionActive
 
         // Get current network type
-        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        val activeNetwork = cm.activeNetworkInfo
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = cm.activeNetwork ?: return
+        val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return
         val networkType = when {
-            activeNetwork?.type == android.net.ConnectivityManager.TYPE_WIFI -> "Wi-Fi"
-            activeNetwork?.type == android.net.ConnectivityManager.TYPE_MOBILE -> "Cellular"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) -> "Bluetooth"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular"
             else -> "Unknown"
         }
 
@@ -265,6 +265,7 @@ class HeartRateService : Service() {
     }
 
     // Handle low memory conditions
+    @Deprecated("Deprecated in Java")
     override fun onLowMemory() {
         super.onLowMemory()
         // Reduce sample rate and clear any buffers

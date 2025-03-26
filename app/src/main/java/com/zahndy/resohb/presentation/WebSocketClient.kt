@@ -1,6 +1,7 @@
 package com.zahndy.resohb.data
 
 import android.content.Context
+import android.content.Intent
 import android.os.BatteryManager
 import android.util.Log
 import kotlinx.coroutines.*
@@ -130,6 +131,7 @@ class WebSocketClient(private val serverUrl : String, private val context: Conte
             } catch(e: Exception) {
                 Log.e(TAG, "WebSocket exception when sending data: ${e.message}", e)
                 isConnected = false
+                broadcastClientStatus()
                 scheduleReconnect()
             }
         }
@@ -154,6 +156,7 @@ class WebSocketClient(private val serverUrl : String, private val context: Conte
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     super.onOpen(webSocket, response)
                     isConnected = true
+                    broadcastClientStatus()
                     reconnectAttempt = 0 // Reset reconnect attempts on successful connection
                     Log.d(TAG, "WebSocket connection established to $serverUrl")
                    
@@ -169,6 +172,7 @@ class WebSocketClient(private val serverUrl : String, private val context: Conte
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     super.onFailure(webSocket, t, response)
                     isConnected = false
+                    broadcastClientStatus()
                     Log.e(TAG, "WebSocket failed: ${t.message}", t)
 
                     // Only attempt to reconnect if not manually disconnected
@@ -180,6 +184,7 @@ class WebSocketClient(private val serverUrl : String, private val context: Conte
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     super.onClosed(webSocket, code, reason)
                     isConnected = false
+                    broadcastClientStatus()
                     Log.d(TAG, "WebSocket closed: $reason")
 
                     // Only attempt to reconnect if not manually disconnected
@@ -192,6 +197,7 @@ class WebSocketClient(private val serverUrl : String, private val context: Conte
             Log.e(TAG, "Exception creating WebSocket: ${e.message}", e)
             // Schedule reconnect after a short delay
             isConnected = false
+            broadcastClientStatus()
             scheduleReconnect()
         }
     }
@@ -206,6 +212,7 @@ class WebSocketClient(private val serverUrl : String, private val context: Conte
         webSocket?.close(1000, "Closing connection")
         webSocket = null
         isConnected = false
+        broadcastClientStatus()
         clientScope.cancel()
     }
 
@@ -243,5 +250,14 @@ class WebSocketClient(private val serverUrl : String, private val context: Conte
     private fun cancelReconnect() {
         reconnectJob?.cancel()
         reconnectJob = null
+    }
+
+    private fun broadcastClientStatus() {
+        Log.d(TAG, "Broadcasting client status: isConnected=$isConnected")
+        val intent = Intent("com.zahndy.resohb.CLIENTS_UPDATED").apply {
+            putExtra("ClientConnected", isConnected)
+            setPackage(context.packageName)
+        }
+        context.sendBroadcast(intent)
     }
 }

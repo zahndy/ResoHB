@@ -8,13 +8,13 @@ package com.zahndy.resohb.presentation
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -26,9 +26,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,7 +41,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
@@ -64,8 +61,18 @@ import androidx.wear.tooling.preview.devices.WearDevices
 import com.zahndy.resohb.R
 import com.zahndy.resohb.presentation.theme.Reso_Theme
 import com.zahndy.resohb.service.HeartRateService
-import java.net.NetworkInterface
-import java.util.Collections
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.rotary.onRotaryScrollEvent
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.wear.compose.material.PositionIndicator
+import androidx.wear.compose.material.Scaffold
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.scrollBy
 
 
 class MainActivity : ComponentActivity() {
@@ -81,6 +88,9 @@ class MainActivity : ComponentActivity() {
     private val _networkStatus = mutableStateOf("Unknown")
     val networkStatus get() = _networkStatus.value
 
+    private val _clientConnected = mutableStateOf(false)
+    val clientConnected get() = _clientConnected.value
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -89,6 +99,16 @@ class MainActivity : ComponentActivity() {
         } else {
             // Handle permission denial
             Toast.makeText(this, "Permissions required for heart rate monitoring", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val clientUpdateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.let {
+                val isConnected = it.getBooleanExtra("ClientConnected", false)
+                Log.d("MainActivity", "BroadcastReceiver received status: isConnected=$isConnected")
+                _clientConnected.value = isConnected
+            }
         }
     }
 
@@ -120,6 +140,9 @@ class MainActivity : ComponentActivity() {
             // Rest of your initialization, if needed
         }, 500)
 
+        // Register broadcast receiver to get client connection updates
+        val clientUpdateFilter = IntentFilter("com.zahndy.resohb.CLIENTS_UPDATED")
+        registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
 
         setContent {
             // Get saved URL from SharedPreferences
@@ -140,9 +163,11 @@ class MainActivity : ComponentActivity() {
                     // Save new URL to SharedPreferences
                     prefs.edit().putString(SERVER_URL_KEY, newUrl).apply()
                 },
-                networkStatus = networkStatus
+                networkStatus = networkStatus,
+                clientConnected = clientConnected
             )
         }
+        requestBatteryOptimizationExemption()
     }
 
     private fun startHeartRateMonitoring() {
@@ -161,9 +186,7 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.FOREGROUND_SERVICE_HEALTH
             ).apply {
                 // Add notification permission for Android 13+
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     add(Manifest.permission.POST_NOTIFICATIONS)
-                }
             }.toTypedArray()
 
             // Check if permissions are already granted
@@ -191,11 +214,7 @@ class MainActivity : ComponentActivity() {
         }
         serviceIntent.putExtra("server_url", finalUrl)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
+        startForegroundService(serviceIntent)
 
         // Set service state to running
         _isServiceRunning.value = true
@@ -334,26 +353,30 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun requestBatteryOptimizationExemption() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            val packageName = packageName
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val packageName = packageName
 
-            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
-                try {
-                    val intent = Intent().apply {
-                        action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-                        data = Uri.parse("package:$packageName")
-                    }
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    Log.e("MainActivity", "Failed to request battery optimization exemption", e)
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                val intent = Intent().apply {
+                    action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                    data = Uri.parse("package:$packageName")
                 }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to request battery optimization exemption", e)
             }
         }
     }
     override fun onDestroy() {
         // Make sure to release Wi-Fi when activity is destroyed
         releaseWifiConnectivity()
+        // Unregister the client update receiver
+        try {
+            unregisterReceiver(clientUpdateReceiver)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error unregistering client receiver: ${e.message}", e)
+        }
         super.onDestroy()
     }
 
@@ -363,8 +386,19 @@ class MainActivity : ComponentActivity() {
         if (isFinishing) {
             stopHeartRateService()
         }
+        try {unregisterReceiver(clientUpdateReceiver)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error unregistering receiver", e)
+        }
         super.onStop()
     }
+    override fun onStart() {
+        super.onStart()
+        // Register receiver when activity becomes visible
+        val clientUpdateFilter = IntentFilter("com.zahndy.resohb.CLIENTS_UPDATED")
+            registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
+    }
+
 }
 
 @Composable
@@ -373,22 +407,41 @@ fun WearApp(
     isServiceRunning: Boolean,
     onToggleService: () -> Unit,
     onUrlChange: (String) -> Unit,
-    networkStatus: String = "Unknown"
+    networkStatus: String = "Unknown",
+    clientConnected: Boolean = false
 ) {
     var serverUrl by remember { mutableStateOf(initialServerUrl) }
     val listState = rememberScalingLazyListState()
 
+    val focusRequester = remember { FocusRequester() }
+    val coroutineScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    var lastHapticFeedbackTime by remember { mutableStateOf(0L) }
+
     Reso_Theme {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 0.dp)
-                .background(MaterialTheme.colors.background),
-            contentAlignment = Alignment.Center,
+        Scaffold(
+            positionIndicator = {
+                PositionIndicator(scalingLazyListState = listState)
+            }
         ) {
             ScalingLazyColumn(
                 modifier = Modifier.fillMaxSize()
-                    .padding(top = 0.dp),
+                    .fillMaxSize()
+                    .padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 2.dp)
+                    .onRotaryScrollEvent {
+                        coroutineScope.launch {
+                            listState.scrollBy(it.verticalScrollPixels)
+                            // Add throttling logic for haptic feedback (500ms)
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - lastHapticFeedbackTime > 100L) {
+                                haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                                lastHapticFeedbackTime = currentTime
+                            }
+                        }
+                        true
+                    }
+                    .focusRequester(focusRequester)
+                    .focusable(),
                 state = listState,
                 contentPadding = PaddingValues(0.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -418,7 +471,27 @@ fun WearApp(
                         Text(if (isServiceRunning) "Stop" else "Start")
                     }
                 }
+                if (isServiceRunning)
+                {
+                    item {
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
+                    item {
+                        Text(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 0.dp),
+                            textAlign = TextAlign.Center,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colors.secondary,
+                            text =  (if(clientConnected) "Connected" else "Disconnected")
+                        )
+                    }
 
+                }
+                item {
+                    Spacer(modifier = Modifier.height(2.dp))
+                }
                 item {
                     Text(
                         modifier = Modifier
@@ -488,6 +561,9 @@ fun WearApp(
             }
         }
     }
+    LaunchedEffect(Unit){
+        focusRequester.requestFocus()
+    }
 }
 
 @Composable
@@ -500,7 +576,7 @@ fun Greeting(greetingName: String) {
     )
 }
 
-@Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true)
+@Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true,apiLevel = 34)
 @Composable
 fun DefaultPreview() {
     WearApp(
@@ -508,6 +584,7 @@ fun DefaultPreview() {
         isServiceRunning = false,
         onToggleService = {},
         onUrlChange = {},
-        networkStatus = "Wi-Fi"
+        networkStatus = "Wi-Fi",
+        clientConnected = false
     )
 }
