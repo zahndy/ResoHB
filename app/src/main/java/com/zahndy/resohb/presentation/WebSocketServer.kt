@@ -1,4 +1,4 @@
-package com.zahndy.resohb.data
+package com.zahndy.resohb.presentation
 
 import android.content.Context
 import android.content.Intent
@@ -170,19 +170,15 @@ class WebSocketServer(
         }
     }
 
-    internal fun clientConnected() {
-        clientCount++
-        broadcastClientCount()
-    }
-
-    internal fun clientDisconnected() {
-        clientCount = (clientCount - 1).coerceAtLeast(0) // Ensure we don't go negative
+    internal fun clientsChanged() {
+        clientCount = connectedClients.size
         broadcastClientCount()
     }
 
     private fun broadcastClientCount() {
         val intent = Intent("com.zahndy.resohb.CLIENTS_UPDATED").apply {
             putExtra("clientCount", clientCount)
+            setPackage(context.packageName)
         }
         context.sendBroadcast(intent)
     }
@@ -191,7 +187,7 @@ class WebSocketServer(
     private inner class InternalWebSocketServer(address: InetSocketAddress) : JavaWebSocketServer(address) {
         override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {
             connectedClients.add(conn)
-            clientConnected()
+            clientsChanged()
             Log.d(TAG, "New client connected: ${conn.remoteSocketAddress}, total clients: ${connectedClients.size}")
             
             // Send initial values to new client
@@ -207,7 +203,7 @@ class WebSocketServer(
 
         override fun onClose(conn: WebSocket, code: Int, reason: String, remote: Boolean) {
             connectedClients.remove(conn)
-            clientDisconnected()
+            clientsChanged()
             Log.d(TAG, "Client disconnected. Code: $code, Reason: $reason, Remote: $remote, remaining clients: ${connectedClients.size}")
         }
 
@@ -220,7 +216,7 @@ class WebSocketServer(
             Log.e(TAG, "WebSocket error: ${ex.message}", ex)
             if (conn != null) {
                 connectedClients.remove(conn)
-                clientDisconnected()
+                clientsChanged()
             }
         }
 

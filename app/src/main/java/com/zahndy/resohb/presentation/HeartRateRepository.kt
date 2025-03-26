@@ -1,4 +1,4 @@
-package com.zahndy.resohb.data
+package com.zahndy.resohb.presentation
 
 import android.content.Context
 import androidx.health.services.client.HealthServices
@@ -26,23 +26,17 @@ class HeartRateRepository(
 ) {
     private val healthClient = HealthServices.getClient(context)
     private val measureClient = healthClient.measureClient
-    
-    // Track power mode to adjust sample rate
+
     private var isPowerSavingMode = false
     private var hasActiveClients = false
     private var currentNetworkType = "Unknown"
-    
-    // Set a default sample rate that can be adjusted
+
     private var currentSampleRate = 1000L // milliseconds
 
-    /**
-     * Returns the current sample rate in milliseconds
-     */
     fun getCurrentSampleRate(): Long {
         return currentSampleRate
     }
 
-    // Properly implemented as a suspend function that can be called from a coroutine
     suspend fun hasHeartRateCapability(): Boolean {
         return try {
             val capabilities = measureClient.getCapabilities()
@@ -73,9 +67,7 @@ class HeartRateRepository(
         }
     }
   
-    /**
-     * Sets the power and client state to adjust sampling behavior
-     */
+    //Set the power and client state to adjust sampling behavior
     fun updatePowerState(powerSaving: Boolean, activeClients: Boolean, networkType: String = "Unknown") {
         if (isPowerSavingMode != powerSaving || hasActiveClients != activeClients || currentNetworkType != networkType) {
             isPowerSavingMode = powerSaving

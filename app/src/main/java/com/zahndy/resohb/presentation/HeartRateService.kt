@@ -1,5 +1,6 @@
 package com.zahndy.resohb.service
 
+import android.app.ActivityOptions
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,29 +9,28 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.zahndy.resohb.R
-import com.zahndy.resohb.data.HeartRateRepository
-import com.zahndy.resohb.data.WebSocketServer
+import com.zahndy.resohb.presentation.HeartRateRepository
 import com.zahndy.resohb.presentation.MainActivity
+import com.zahndy.resohb.presentation.WebSocketServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import kotlin.time.Duration.Companion.milliseconds
+
 
 class HeartRateService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -99,14 +99,11 @@ class HeartRateService : Service() {
             this,
             BODY_SENSORS_PERMISSION
         ) == PackageManager.PERMISSION_GRANTED
-
-        var hasNotificationPermission = true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            hasNotificationPermission = ContextCompat.checkSelfPermission(
+        val hasNotificationPermission: Boolean = ContextCompat.checkSelfPermission(
                 this,
                 android.Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
-        }
+
 
         // Log permission status to help with debugging
         Log.d("HeartRateService", "Body sensors permission: $hasBodySensorsPermission")
@@ -116,11 +113,10 @@ class HeartRateService : Service() {
     }
     
     private var lastNotificationUpdate = 0L
-    private val NOTIFICATION_UPDATE_INTERVAL = 2000L // 2 seconds
+    private val notificationUpdateInterval = 2000L // 2 seconds
     private var isInPowerSavingMode = false
     private var hasConnectedClients = false
     private var currentNetworkType = "Unknown"
-    private var clientCount = 0
 
     private fun collectHeartRate() {
         serviceScope.launch {
@@ -132,7 +128,7 @@ class HeartRateService : Service() {
                 .distinctUntilChanged()
                 // Use conflate to drop intermediary values if processing is slow
                 .conflate()
-                .catch { e ->
+                .catch {
                     // Handle errors
                     stopSelf()
                 }
@@ -142,7 +138,7 @@ class HeartRateService : Service() {
 
                     // Update notification less frequently to save resources
                     val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastNotificationUpdate > NOTIFICATION_UPDATE_INTERVAL) {
+                    if (currentTime - lastNotificationUpdate > notificationUpdateInterval) {
                         val clientCount = webSocketServer.getConnectedClientCount()
                         
                         // Only update notification if we have clients
@@ -154,8 +150,7 @@ class HeartRateService : Service() {
                             lastNotificationUpdate = currentTime
                         }
                     }
-                    
-                    // Periodically check if power saving mode changed
+
                     updatePowerSavingMode()
                 }
         }
@@ -169,11 +164,13 @@ class HeartRateService : Service() {
         val newHasConnectedClients = webSocketServer.getConnectedClientCount() > 0
         
         // Get current network type
-        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        val activeNetwork = cm.activeNetworkInfo
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = cm.activeNetwork ?: return
+        val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return
         val networkType = when {
-            activeNetwork?.type == android.net.ConnectivityManager.TYPE_WIFI -> "Wi-Fi"
-            activeNetwork?.type == android.net.ConnectivityManager.TYPE_MOBILE -> "Cellular"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) -> "Bluetooth"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular"
             else -> "Unknown"
         }
         
@@ -208,9 +205,10 @@ class HeartRateService : Service() {
 
     private fun createNotification(contentText: String): Notification {
         val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
-        )
+        val activityOptions = ActivityOptions.makeBasic()
+        activityOptions.setPendingIntentCreatorBackgroundActivityStartMode (ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT + PendingIntent.FLAG_IMMUTABLE
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags, activityOptions.toBundle())
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Heart Rate Monitor")

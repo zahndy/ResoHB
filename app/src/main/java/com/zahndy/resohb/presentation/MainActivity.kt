@@ -15,7 +15,6 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -102,6 +101,15 @@ class MainActivity : ComponentActivity() {
         } else {
             // Handle permission denial
             Toast.makeText(this, "Permissions required for heart rate monitoring", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val clientUpdateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.let {
+                val count = it.getIntExtra("clientCount", 0)
+                _connectedClients.value = count
+            }
         }
     }
 
@@ -212,10 +220,8 @@ class MainActivity : ComponentActivity() {
                             Manifest.permission.BODY_SENSORS_BACKGROUND,
                             Manifest.permission.FOREGROUND_SERVICE_HEALTH
                         ).apply {
-                            // Add notification permission for Android 13+
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                add(Manifest.permission.POST_NOTIFICATIONS)
-                            }
+                            // Add notification permission
+                            add(Manifest.permission.POST_NOTIFICATIONS)
                         }.toTypedArray()
 
                         // Check if permissions are already granted
@@ -243,10 +249,8 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.BODY_SENSORS_BACKGROUND,
                 Manifest.permission.FOREGROUND_SERVICE_HEALTH
             ).apply {
-                // Add notification permission for Android 13+
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    add(Manifest.permission.POST_NOTIFICATIONS)
-                }
+                // Add notification permission
+                add(Manifest.permission.POST_NOTIFICATIONS)
             }.toTypedArray()
 
             // Check if permissions are already granted
@@ -270,11 +274,7 @@ class MainActivity : ComponentActivity() {
         // Pass the server port to the service
         serviceIntent.putExtra("server_port", serverPort)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
+        startForegroundService(serviceIntent)
 
         // Set service state to running
         _isServiceRunning.value = true
@@ -289,7 +289,7 @@ class MainActivity : ComponentActivity() {
         releaseWifiConnectivity()
 
         // Send broadcast to signal the service has stopped
-        sendBroadcast(Intent("com.zahndy.resohb.SERVICE_STOPPED"))
+        sendBroadcast(Intent("com.zahndy.resohb.SERVICE_STOPPED").setPackage(packageName))
     }
 
     private fun requestWifiConnectivity() {
@@ -411,21 +411,20 @@ class MainActivity : ComponentActivity() {
             else -> "Unknown"
         }
     }
-    private fun requestBatteryOptimizationExemption() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            val packageName = packageName
 
-            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
-                try {
-                    val intent = Intent().apply {
-                        action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-                        data = Uri.parse("package:$packageName")
-                    }
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    Log.e("MainActivity", "Failed to request battery optimization exemption", e)
+    private fun requestBatteryOptimizationExemption() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val packageName = packageName
+
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                val intent = Intent().apply {
+                    action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                    data = Uri.parse("package:$packageName")
                 }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to request battery optimization exemption", e)
             }
         }
     }
@@ -447,17 +446,21 @@ class MainActivity : ComponentActivity() {
         if (isFinishing) {
             stopHeartRateService()
         }
+        try {
+            unregisterReceiver(clientUpdateReceiver)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error unregistering client receiver: ${e.message}", e)
+        }
         super.onStop()
     }
 
-    private val clientUpdateReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            intent?.let {
-                val count = it.getIntExtra("clientCount", 0)
-                _connectedClients.value = count
-            }
-        }
+    override fun onStart() {
+        super.onStart()
+        // Register receiver when activity becomes visible
+        val clientUpdateFilter = IntentFilter("com.zahndy.resohb.CLIENTS_UPDATED")
+        registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
     }
+
 }
 
 @Composable
@@ -673,7 +676,7 @@ fun Greeting(greetingName: String) {
     )
 }
 
-@Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true)
+@Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true,apiLevel = 34)
 @Composable
 fun DefaultPreview() {
     WearApp(
