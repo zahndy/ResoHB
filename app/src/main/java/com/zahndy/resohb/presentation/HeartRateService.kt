@@ -1,4 +1,4 @@
-package com.zahndy.resohb.service
+package com.zahndy.resohb.presentation
 
 import android.app.ActivityOptions
 import android.app.Notification
@@ -16,9 +16,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.zahndy.resohb.R
-import com.zahndy.resohb.presentation.HeartRateRepository
-import com.zahndy.resohb.presentation.MainActivity
-import com.zahndy.resohb.presentation.WebSocketServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

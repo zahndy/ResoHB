@@ -14,7 +14,6 @@ import java.util.concurrent.TimeUnit
 class WebSocketClient(serverUrl: String) {
     private val TAG = "WebSocketClient"
 
-    // Ensure the serverUrl has the proper protocol prefix
     private val serverUrl = formatUrl(serverUrl)
 
     private val client = OkHttpClient.Builder()
@@ -30,7 +29,7 @@ class WebSocketClient(serverUrl: String) {
     private val maxReconnectAttempts = 10 // Maximum number of reconnection attempts
     private var isManuallyDisconnected = false
 
-    // Format URL to ensure it uses HTTP protocol for the WebSocket
+    // Format URL
     private fun formatUrl(url: String): String {
         // First trim any whitespace
         val trimmedUrl = url.trim()

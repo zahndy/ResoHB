@@ -71,7 +71,6 @@ import androidx.wear.compose.material.Scaffold
 import androidx.wear.tooling.preview.devices.WearDevices
 import com.zahndy.resohb.R
 import com.zahndy.resohb.presentation.theme.Reso_Theme
-import com.zahndy.resohb.service.HeartRateService
 import kotlinx.coroutines.launch
 import java.net.NetworkInterface
 import java.util.Collections
@@ -431,12 +430,6 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         // Make sure to release Wi-Fi when activity is destroyed
         releaseWifiConnectivity()
-        // Unregister the client update receiver
-        try {
-            unregisterReceiver(clientUpdateReceiver)
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error unregistering client receiver: ${e.message}", e)
-        }
         super.onDestroy()
     }
 
@@ -445,11 +438,6 @@ class MainActivity : ComponentActivity() {
         // If the app is being force-closed, make sure to stop the service
         if (isFinishing) {
             stopHeartRateService()
-        }
-        try {
-            unregisterReceiver(clientUpdateReceiver)
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error unregistering client receiver: ${e.message}", e)
         }
         super.onStop()
     }
