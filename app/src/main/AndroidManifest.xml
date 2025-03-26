@@ -41,7 +41,7 @@
             </intent-filter>
         </activity>
         <service
-            android:name=".service.HeartRateService"
+            android:name=".presentation.HeartRateService"
             android:foregroundServiceType="health"
             android:exported="false" />
     </application>

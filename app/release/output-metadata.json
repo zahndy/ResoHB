@@ -13,7 +13,7 @@
       "attributes": [],
       "versionCode": 1,
       "versionName": "1.3",
-      "outputFile": "ResoHB-release.apk"
+      "outputFile": "app-release.apk"
     }
   ],
   "elementType": "File",

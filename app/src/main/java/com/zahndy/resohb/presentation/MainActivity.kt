@@ -177,7 +177,6 @@ class MainActivity : ComponentActivity() {
         Handler(Looper.getMainLooper()).postDelayed({
             // Request Wi-Fi connectivity first
             requestWifiConnectivity()
-
             
             val permissions = mutableListOf(
                 Manifest.permission.BODY_SENSORS,
@@ -212,7 +211,6 @@ class MainActivity : ComponentActivity() {
             "ws://${serverUrl ?: DEFAULT_SERVER_URL}"
         }
         serviceIntent.putExtra("server_url", finalUrl)
-
         startForegroundService(serviceIntent)
 
         // Set service state to running
