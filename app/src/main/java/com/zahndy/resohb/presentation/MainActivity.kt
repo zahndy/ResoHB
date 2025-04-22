@@ -74,6 +74,9 @@ import com.zahndy.resohb.presentation.theme.Reso_Theme
 import kotlinx.coroutines.launch
 import java.net.NetworkInterface
 import java.util.Collections
+import android.app.ActivityManager
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 
 
 class MainActivity : ComponentActivity() {
@@ -119,6 +122,15 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         setTheme(android.R.style.Theme_DeviceDefault)
+
+        // Handle back button/gesture to move app to background instead of closing
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT
+            ) {
+                moveTaskToBack(true)
+            }
+        }
 
         // Initialize connectivity manager
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -449,6 +461,32 @@ class MainActivity : ComponentActivity() {
         registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
     }
 
+    // Implement onNewIntent to handle when the app is reopened
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Update the activity's intent
+        setIntent(intent)
+
+        // Refresh UI state when reopening via notification
+        updateNetworkStatus()
+        updateServiceStatus()
+    }
+
+    private fun updateServiceStatus() {
+        val serviceIntent = Intent(this, HeartRateService::class.java)
+        _isServiceRunning.value = isServiceRunning(serviceIntent)
+    }
+
+    private fun isServiceRunning(serviceIntent: Intent): Boolean {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            if (serviceIntent.component?.className == service.service.className) {
+                return true
+            }
+        }
+        return false
+    }
+
 }
 
 @Composable
@@ -639,6 +677,23 @@ fun WearApp(
                             color = MaterialTheme.colors.primary,
                             text = networkStatus
                         )
+                    }
+                    // Close App button
+                    item {
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                    item {
+                        Button(
+                            modifier = Modifier.width(140.dp),
+                            onClick = {
+                                coroutineScope.launch {
+                                    // Logic to close the app via activity context will be added in MainActivity
+                                    android.os.Process.killProcess(android.os.Process.myPid())
+                                }
+                            }
+                        ) {
+                            Text("Close App")
+                        }
                     }
                     item {
                         Spacer(

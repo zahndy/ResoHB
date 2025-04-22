@@ -108,7 +108,7 @@ class HeartRateService : Service() {
 
         return hasBodySensorsPermission && hasNotificationPermission
     }
-    
+
     private var lastNotificationUpdate = 0L
     private val notificationUpdateInterval = 2000L // 2 seconds
     private var isInPowerSavingMode = false
@@ -119,7 +119,7 @@ class HeartRateService : Service() {
         serviceScope.launch {
             // Check if we should be in power saving mode
             updatePowerSavingMode()
-            
+
             heartRateRepository.heartRateFlow()
                 // Only process distinct heart rate values
                 .distinctUntilChanged()
@@ -137,7 +137,7 @@ class HeartRateService : Service() {
                     val currentTime = System.currentTimeMillis()
                     if (currentTime - lastNotificationUpdate > notificationUpdateInterval) {
                         val clientCount = webSocketServer.getConnectedClientCount()
-                        
+
                         // Only update notification if we have clients
                         if (clientCount > 0) {
                             val clientText = if (clientCount == 1) "1 client" else "$clientCount clients"
@@ -152,14 +152,14 @@ class HeartRateService : Service() {
                 }
         }
     }
-    
+
     // Update power saving mode and adjust sampling rate
     private fun updatePowerSavingMode() {
         // Check if power saving mode is on
         val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         val newPowerSavingMode = powerManager.isPowerSaveMode
         val newHasConnectedClients = webSocketServer.getConnectedClientCount() > 0
-        
+
         // Get current network type
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val activeNetwork = cm.activeNetwork ?: return
@@ -170,17 +170,17 @@ class HeartRateService : Service() {
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular"
             else -> "Unknown"
         }
-        
-        if (newPowerSavingMode != isInPowerSavingMode || 
+
+        if (newPowerSavingMode != isInPowerSavingMode ||
             newHasConnectedClients != hasConnectedClients ||
             networkType != currentNetworkType) {
-            
+
             isInPowerSavingMode = newPowerSavingMode
             hasConnectedClients = newHasConnectedClients
             currentNetworkType = networkType
-            
+
             heartRateRepository.updatePowerState(
-                powerSaving = isInPowerSavingMode, 
+                powerSaving = isInPowerSavingMode,
                 activeClients = hasConnectedClients,
                 networkType = currentNetworkType
             )
@@ -201,10 +201,13 @@ class HeartRateService : Service() {
     }
 
     private fun createNotification(contentText: String): Notification {
-        val intent = Intent(this, MainActivity::class.java)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            // These flags ensure we reuse the existing activity instance
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
         val activityOptions = ActivityOptions.makeBasic()
-        activityOptions.setPendingIntentCreatorBackgroundActivityStartMode (ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT + PendingIntent.FLAG_IMMUTABLE
+        activityOptions.setPendingIntentCreatorBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags, activityOptions.toBundle())
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -223,10 +226,10 @@ class HeartRateService : Service() {
             // 1. Stop any websocket server
             Log.d("HeartRateService", "Stopping WebSocketServer")
             webSocketServer.stop()
-            
+
             // 2. Cancel all coroutines
             serviceScope.cancel()
-            
+
             // 3. Make sure to wait for any pending socket operations to complete
             runBlocking {
                 // Give coroutines a chance to complete cleanly with timeout
@@ -236,10 +239,10 @@ class HeartRateService : Service() {
                     }
                 }
             }
-            
+
             // 4. Release any sensor resources if necessary
             heartRateRepository.releaseResources()
-            
+
             Log.d("HeartRateService", "Service destroyed, all resources released")
         } catch (e: Exception) {
             Log.e("HeartRateService", "Error during service shutdown: ${e.message}", e)
