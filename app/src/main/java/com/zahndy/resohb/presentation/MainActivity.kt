@@ -6,6 +6,7 @@
 package com.zahndy.resohb.presentation
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -72,6 +73,10 @@ import androidx.wear.compose.material.Scaffold
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.scrollBy
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 
 
 class MainActivity : ComponentActivity() {
@@ -118,6 +123,15 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         setTheme(android.R.style.Theme_DeviceDefault)
+
+        // Handle back button/gesture to move app to background instead of closing
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT
+            ) {
+                moveTaskToBack(true)
+            }
+        }
 
         // Initialize connectivity manager
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -177,7 +191,7 @@ class MainActivity : ComponentActivity() {
         Handler(Looper.getMainLooper()).postDelayed({
             // Request Wi-Fi connectivity first
             requestWifiConnectivity()
-            
+
             val permissions = mutableListOf(
                 Manifest.permission.BODY_SENSORS,
                 Manifest.permission.BODY_SENSORS_BACKGROUND,
@@ -365,6 +379,32 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    // Implement onNewIntent to handle when the app is reopened
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Update the activity's intent
+        setIntent(intent)
+
+        // Refresh UI state when reopening via notification
+        updateNetworkStatus()
+        updateServiceStatus()
+    }
+
+    private fun updateServiceStatus() {
+        val serviceIntent = Intent(this, HeartRateService::class.java)
+        _isServiceRunning.value = isServiceRunning(serviceIntent)
+    }
+
+    private fun isServiceRunning(serviceIntent: Intent): Boolean {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            if (serviceIntent.component?.className == service.service.className) {
+                return true
+            }
+        }
+        return false
+    }
+
     override fun onDestroy() {
         // Make sure to release Wi-Fi when activity is destroyed
         releaseWifiConnectivity()
@@ -395,7 +435,6 @@ class MainActivity : ComponentActivity() {
         val clientUpdateFilter = IntentFilter("com.zahndy.resohb.CLIENTS_UPDATED")
         registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
     }
-
 }
 
 @Composable
@@ -549,6 +588,23 @@ fun WearApp(
                         text = networkStatus
                     )
                 }
+                // Close App button
+                    item {
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                    item {
+                        Button(
+                            modifier = Modifier.width(140.dp),
+                            onClick = {
+                                coroutineScope.launch {
+                                    // Logic to close the app via activity context will be added in MainActivity
+                                    android.os.Process.killProcess(android.os.Process.myPid())
+                                }
+                            }
+                        ) {
+                            Text("Close App")
+                        }
+                    }
                 item {
                     Spacer(
                         modifier = Modifier.height(10.dp)

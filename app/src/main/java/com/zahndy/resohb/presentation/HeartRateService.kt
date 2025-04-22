@@ -209,11 +209,14 @@ class HeartRateService : Service() {
     }
 
     private fun createNotification(contentText: String): Notification {
-        val intent = Intent(this, MainActivity::class.java)
-        val activityOptions = ActivityOptions.makeBasic()
-        activityOptions.setPendingIntentCreatorBackgroundActivityStartMode (ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT + PendingIntent.FLAG_IMMUTABLE
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags, activityOptions.toBundle())
+        val intent = Intent(this, MainActivity::class.java).apply {
+           // These flags ensure we reuse the existing activity instance
+           flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+       }
+       val activityOptions = ActivityOptions.makeBasic()
+       activityOptions.setPendingIntentCreatorBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+       val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+       val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags, activityOptions.toBundle())
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Heart Rate Monitor")
