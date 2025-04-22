@@ -14,7 +14,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.4"
-        setProperty("archivesBaseName", "ResoHB-$versionName")
+        setProperty("archivesBaseName", "ResoHB_$versionName")
     }
 
     buildTypes {
