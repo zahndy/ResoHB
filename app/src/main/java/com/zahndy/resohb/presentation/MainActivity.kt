@@ -75,7 +75,6 @@ import kotlinx.coroutines.launch
 import java.net.NetworkInterface
 import java.util.Collections
 import android.app.ActivityManager
-import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 
 
@@ -95,6 +94,9 @@ class MainActivity : ComponentActivity() {
     private val _connectedClients = mutableStateOf(0)
     val connectedClients get() = _connectedClients.value
 
+    private val _timeout = mutableStateOf("")
+    val timeout get() = _timeout.value
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -111,6 +113,15 @@ class MainActivity : ComponentActivity() {
             intent?.let {
                 val count = it.getIntExtra("clientCount", 0)
                 _connectedClients.value = count
+            }
+        }
+    }
+
+    private val timeoutUpdateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.let {
+                val timeoutStr = it.getStringExtra("timeout") ?: ""
+                _timeout.value = timeoutStr
             }
         }
     }
@@ -152,9 +163,8 @@ class MainActivity : ComponentActivity() {
             // Rest of your initialization, if needed
         }, 500)
 
-        // Register broadcast receiver to get client connection updates
-        val clientUpdateFilter = IntentFilter("com.zahndy.resohb.CLIENTS_UPDATED")
-        registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
+        // Register broadcast receivers
+        registerReceivers()
 
         setContent {
             // Get saved port from SharedPreferences
@@ -187,10 +197,19 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 networkStatus = networkStatus,
-                connectedClients = connectedClients
+                connectedClients = connectedClients,
+                timeout = timeout
             )
         }
         requestBatteryOptimizationExemption()
+    }
+
+    private fun registerReceivers() {
+        val clientUpdateFilter = IntentFilter("com.zahndy.resohb.CLIENTS_UPDATED")
+        registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
+
+        val timeoutUpdateFilter = IntentFilter(HeartRateService.TIMEOUT_ACTION)
+        registerReceiver(timeoutUpdateReceiver, timeoutUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
     }
 
     private fun getDeviceIpAddress(): String {
@@ -295,6 +314,9 @@ class MainActivity : ComponentActivity() {
         val serviceIntent = Intent(this, HeartRateService::class.java)
         stopService(serviceIntent)
         _isServiceRunning.value = false
+        
+        // Clear timeout UI
+        _timeout.value = ""
 
         // Release Wi-Fi network
         releaseWifiConnectivity()
@@ -440,7 +462,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onDestroy() {
-        // Make sure to release Wi-Fi when activity is destroyed
+        // Release Wi-Fi when activity is destroyed
         releaseWifiConnectivity()
         super.onDestroy()
     }
@@ -456,12 +478,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Register receiver when activity becomes visible
-        val clientUpdateFilter = IntentFilter("com.zahndy.resohb.CLIENTS_UPDATED")
-        registerReceiver(clientUpdateReceiver, clientUpdateFilter, Context.RECEIVER_NOT_EXPORTED)
+        // Register receivers when activity becomes visible
+        registerReceivers()
     }
 
-    // Implement onNewIntent to handle when the app is reopened
+    // Handle when the app is reopened
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // Update the activity's intent
@@ -497,12 +518,15 @@ fun WearApp(
     onToggleService: () -> Unit,
     onPortChange: (String) -> Unit,
     networkStatus: String = "Unknown",
-    connectedClients: Int = 0
+    connectedClients: Int = 0,
+    timeout: String = ""
 ) {
     var port by remember { mutableStateOf(serverPort.toString()) }
     val listState = rememberScalingLazyListState()
 
     val connectionAddress = "ws://$deviceIpAddress:$serverPort"
+
+    val timeOutString = timeout
 
     val focusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
@@ -612,6 +636,19 @@ fun WearApp(
                             color = MaterialTheme.colors.secondary,
                             text = "Clients: $connectedClients" //show the current amount of connected clients
                         )
+                    }
+                    if (timeOutString.isNotEmpty() && connectedClients == 0) {
+                        item {
+                            Text(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 0.dp, vertical = 0.dp),
+                                textAlign = TextAlign.Center,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colors.error,
+                                text = "Timeout in: $timeOutString"
+                            )
+                        }
                     }
                     item {
                         Spacer(

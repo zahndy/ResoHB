@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.CountDownTimer
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -29,13 +30,31 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
 
-class HeartRateService : Service() {
+class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var heartRateRepository: HeartRateRepository
     private lateinit var webSocketServer: WebSocketServer
 
     // Default server port (will be overridden by intent extra if provided)
     private var serverPort = 9555
+    private val timeoutTimer = object : CountDownTimer(1200000, 1000) {
+        override fun onTick(millisUntilFinished: Long) {
+            val totalSeconds = millisUntilFinished / 1000
+            val minutes = totalSeconds / 60
+            val seconds = totalSeconds % 60
+            val timeString = String.format("%02d:%02d", minutes, seconds)
+            broadcastTimeout(timeString)
+            val notification = createNotification("0 clients, shutdown in $timeString")
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID, notification)
+        }
+
+        override fun onFinish() {
+            broadcastTimeout("00:00")
+            stopSelf()
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+    }
 
     companion object {
         private const val NOTIFICATION_ID = 1
@@ -43,6 +62,7 @@ class HeartRateService : Service() {
         private const val PERMISSION_REQUEST_CODE = 100
         private const val SERVER_PORT_EXTRA = "server_port"
         const val BODY_SENSORS_PERMISSION = android.Manifest.permission.BODY_SENSORS
+        const val TIMEOUT_ACTION = "com.zahndy.resohb.TIMEOUT_UPDATED"
     }
 
     override fun onCreate() {
@@ -61,6 +81,7 @@ class HeartRateService : Service() {
 
         // Initialize WebSocketServer with port
         webSocketServer = WebSocketServer(applicationContext, serverPort)
+        webSocketServer.setCallback(this)
 
         if (!hasRequiredPermissions()) {
             Log.e("HeartRateService", "Missing required permissions")
@@ -75,6 +96,11 @@ class HeartRateService : Service() {
             // Start WebSocket server
             webSocketServer.start()
 
+            // If no clients are connected at start, begin the countdown
+            if (webSocketServer.getConnectedClientCount() == 0) {
+                timeoutTimer.start()
+            }
+
             val hasCapability = heartRateRepository.hasHeartRateCapability()
             Log.d("HeartRateService", "Heart rate capability check result: $hasCapability")
 
@@ -88,6 +114,27 @@ class HeartRateService : Service() {
         }
 
         return START_STICKY
+    }
+
+    // WebSocketServerCallback implementation
+    override fun onServerStarted(port: Int) {}
+    override fun onServerError(errorMessage: String) {}
+    override fun onClientConnected(count: Int) {
+        timeoutTimer.cancel()
+        broadcastTimeout("")
+    }
+    override fun onClientDisconnected(count: Int) {
+        if (count == 0) {
+            timeoutTimer.start()
+        }
+    }
+
+    private fun broadcastTimeout(timeString: String) {
+        val intent = Intent(TIMEOUT_ACTION).apply {
+            putExtra("timeout", timeString)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
     }
 
     private fun hasRequiredPermissions(): Boolean {
@@ -110,7 +157,7 @@ class HeartRateService : Service() {
     }
 
     private var lastNotificationUpdate = 0L
-    private val notificationUpdateInterval = 2000L // 2 seconds
+    private var notificationUpdateInterval = 2000L // 2 seconds
     private var isInPowerSavingMode = false
     private var hasConnectedClients = false
     private var currentNetworkType = "Unknown"
@@ -138,16 +185,18 @@ class HeartRateService : Service() {
                     if (currentTime - lastNotificationUpdate > notificationUpdateInterval) {
                         val clientCount = webSocketServer.getConnectedClientCount()
 
-                        // Only update notification if we have clients
                         if (clientCount > 0) {
+                            notificationUpdateInterval = 2000L
                             val clientText = if (clientCount == 1) "1 client" else "$clientCount clients"
                             val notification = createNotification("HR: $heartRate BPM | $clientText connected")
                             val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
                             notificationManager.notify(NOTIFICATION_ID, notification)
                             lastNotificationUpdate = currentTime
                         }
+                        else {
+                            notificationUpdateInterval = 1000L
+                        }
                     }
-
                     updatePowerSavingMode()
                 }
         }
@@ -223,6 +272,8 @@ class HeartRateService : Service() {
 
     override fun onDestroy() {
         try {
+            timeoutTimer.cancel()
+            
             // 1. Stop any websocket server
             Log.d("HeartRateService", "Stopping WebSocketServer")
             webSocketServer.stop()

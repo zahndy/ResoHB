@@ -173,6 +173,14 @@ class WebSocketServer(
     internal fun clientsChanged() {
         clientCount = connectedClients.size
         broadcastClientCount()
+        
+        // Notify callback of client changes
+        val currentCount = clientCount
+        if (currentCount > 0) {
+            callback?.onClientConnected(currentCount)
+        } else {
+            callback?.onClientDisconnected(0)
+        }
     }
 
     private fun broadcastClientCount() {
