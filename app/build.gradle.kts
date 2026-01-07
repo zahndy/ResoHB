@@ -13,7 +13,7 @@ android {
         minSdk = 34
         targetSdk = 34
         versionCode = 1
-        versionName = "1.5"
+        versionName = "1.6"
         setProperty("archivesBaseName", "ResoHBS_$versionName")
     }
 

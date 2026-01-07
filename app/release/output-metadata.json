@@ -12,8 +12,8 @@
       "filters": [],
       "attributes": [],
       "versionCode": 1,
-      "versionName": "1.5",
-      "outputFile": "ResoHBS_1.5-release.apk"
+      "versionName": "1.6",
+      "outputFile": "ResoHBS_1.6-release.apk"
     }
   ],
   "elementType": "File",
@@ -22,14 +22,14 @@
       "minApi": 28,
       "maxApi": 30,
       "baselineProfiles": [
-        "baselineProfiles/1/ResoHBS_1.5-release.dm"
+        "baselineProfiles/1/ResoHBS_1.6-release.dm"
       ]
     },
     {
       "minApi": 31,
       "maxApi": 2147483647,
       "baselineProfiles": [
-        "baselineProfiles/0/ResoHBS_1.5-release.dm"
+        "baselineProfiles/0/ResoHBS_1.6-release.dm"
       ]
     }
   ],

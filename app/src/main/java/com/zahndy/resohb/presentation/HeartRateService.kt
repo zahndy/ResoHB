@@ -34,6 +34,9 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var heartRateRepository: HeartRateRepository
     private lateinit var webSocketServer: WebSocketServer
+    
+    private val notificationManager by lazy { getSystemService(NOTIFICATION_SERVICE) as NotificationManager }
+    private val builder by lazy { NotificationCompat.Builder(this, CHANNEL_ID) }
 
     // Default server port (will be overridden by intent extra if provided)
     private var serverPort = 9555
@@ -44,9 +47,9 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
             val seconds = totalSeconds % 60
             val timeString = String.format("%02d:%02d", minutes, seconds)
             broadcastTimeout(timeString)
-            val notification = createNotification("0 clients, shutdown in $timeString")
-            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.notify(NOTIFICATION_ID, notification)
+
+            builder.setContentText("0 clients, shutdown in $timeString")
+            notificationManager.notify(NOTIFICATION_ID, builder.build())
         }
 
         override fun onFinish() {
@@ -188,13 +191,12 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
                         if (clientCount > 0) {
                             notificationUpdateInterval = 2000L
                             val clientText = if (clientCount == 1) "1 client" else "$clientCount clients"
-                            val notification = createNotification("HR: $heartRate BPM | $clientText connected")
-                            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                            notificationManager.notify(NOTIFICATION_ID, notification)
+                            builder.setContentText("HR: $heartRate BPM | $clientText connected")
+                            notificationManager.notify(NOTIFICATION_ID, builder.build())
                             lastNotificationUpdate = currentTime
                         }
                         else {
-                            notificationUpdateInterval = 1000L
+                            notificationUpdateInterval = 2000L
                         }
                     }
                     updatePowerSavingMode()
@@ -259,13 +261,14 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags, activityOptions.toBundle())
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+         builder
             .setContentTitle("Heart Rate Monitor")
             .setContentText(contentText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .build()
+            .setOnlyAlertOnce(true)
+        return builder.build()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
