@@ -183,12 +183,10 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
                 .collect { heartRate ->
                     // Send heart rate via WebSocket server
                     webSocketServer.broadcastHeartRate(heartRate)
-
                     // Update notification less frequently to save resources
                     val currentTime = System.currentTimeMillis()
                     if (currentTime - lastNotificationUpdate > notificationUpdateInterval) {
                         val clientCount = webSocketServer.getConnectedClientCount()
-
                         if (clientCount > 0) {
                             notificationUpdateInterval = 2000L
                             val clientText = if (clientCount == 1) "1 client" else "$clientCount clients"
@@ -255,8 +253,8 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
     private fun createNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java).apply {
             // These flags ensure we reuse the existing activity instance
-            //flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            //flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val activityOptions = ActivityOptions.makeBasic()
         activityOptions.setPendingIntentCreatorBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
