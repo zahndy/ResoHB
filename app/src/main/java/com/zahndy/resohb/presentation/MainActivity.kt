@@ -14,7 +14,6 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
-import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -43,7 +42,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material.Button
@@ -69,13 +67,13 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumnDefaults
 import androidx.wear.compose.material.PositionIndicator
 import androidx.wear.compose.material.Scaffold
 import androidx.wear.tooling.preview.devices.WearDevices
-import com.zahndy.resohb.R
 import com.zahndy.resohb.presentation.theme.Reso_Theme
 import kotlinx.coroutines.launch
 import java.net.NetworkInterface
 import java.util.Collections
 import android.app.ActivityManager
 import android.window.OnBackInvokedDispatcher
+import androidx.core.net.toUri
 
 
 class MainActivity : ComponentActivity() {
@@ -135,12 +133,10 @@ class MainActivity : ComponentActivity() {
         setTheme(android.R.style.Theme_DeviceDefault)
 
         // Handle back button/gesture to move app to background instead of closing
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                OnBackInvokedDispatcher.PRIORITY_DEFAULT
-            ) {
-                moveTaskToBack(true)
-            }
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(
+            OnBackInvokedDispatcher.PRIORITY_DEFAULT
+        ) {
+            moveTaskToBack(true)
         }
 
         // Initialize connectivity manager
@@ -192,7 +188,7 @@ class MainActivity : ComponentActivity() {
                         if (port in 1024..65535) {
                             prefs.edit().putInt(SERVER_PORT_KEY, port).apply()
                         }
-                    } catch (e: NumberFormatException) {
+                    } catch (_: NumberFormatException) {
                         // Invalid port format, ignore
                     }
                 },
@@ -248,7 +244,9 @@ class MainActivity : ComponentActivity() {
                         val permissions = mutableListOf(
                             Manifest.permission.BODY_SENSORS,
                             Manifest.permission.BODY_SENSORS_BACKGROUND,
-                            Manifest.permission.FOREGROUND_SERVICE_HEALTH
+                            Manifest.permission.FOREGROUND_SERVICE_HEALTH,
+                            Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                                
                         ).apply {
                             // Add notification permission
                             add(Manifest.permission.POST_NOTIFICATIONS)
@@ -277,7 +275,8 @@ class MainActivity : ComponentActivity() {
             val permissions = mutableListOf(
                 Manifest.permission.BODY_SENSORS,
                 Manifest.permission.BODY_SENSORS_BACKGROUND,
-                Manifest.permission.FOREGROUND_SERVICE_HEALTH
+                Manifest.permission.FOREGROUND_SERVICE_HEALTH,
+                Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
             ).apply {
                 // Add notification permission
                 add(Manifest.permission.POST_NOTIFICATIONS)
@@ -453,7 +452,7 @@ class MainActivity : ComponentActivity() {
             try {
                 val intent = Intent().apply {
                     action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-                    data = Uri.parse("package:$packageName")
+                    data = "package:$packageName".toUri()
                 }
                 startActivity(intent)
             } catch (e: Exception) {
@@ -500,6 +499,7 @@ class MainActivity : ComponentActivity() {
 
     private fun isServiceRunning(serviceIntent: Intent): Boolean {
         val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        @SuppressWarnings("deprecation")
         for (service in manager.getRunningServices(Int.MAX_VALUE)) {
             if (serviceIntent.component?.className == service.service.className) {
                 return true
@@ -744,16 +744,6 @@ fun WearApp(
     LaunchedEffect(Unit){
         focusRequester.requestFocus()
     }
-}
-
-@Composable
-fun Greeting(greetingName: String) {
-    Text(
-        modifier = Modifier.fillMaxWidth(),
-        textAlign = TextAlign.Center,
-        color = MaterialTheme.colors.primary,
-        text = stringResource(R.string.hello_world, greetingName)
-    )
 }
 
 @Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true,apiLevel = 34)

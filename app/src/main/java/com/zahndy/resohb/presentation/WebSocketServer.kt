@@ -102,12 +102,8 @@ class WebSocketServer(
         }
     }
 
-    // Check if the server is running
-    fun isServerRunning(): Boolean = isRunning
-
     // Get number of connected clients
     fun getConnectedClientCount(): Int = connectedClients.size
-
     private var heartRateBuffer = mutableListOf<Int>()
     private var lastBroadcastTime = 0L
     private val BROADCAST_INTERVAL = 1000L // Broadcast at most every 1000ms

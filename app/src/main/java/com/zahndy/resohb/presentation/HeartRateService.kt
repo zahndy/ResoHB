@@ -35,8 +35,8 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
     private lateinit var heartRateRepository: HeartRateRepository
     private lateinit var webSocketServer: WebSocketServer
     
-    private val notificationManager by lazy { getSystemService(NOTIFICATION_SERVICE) as NotificationManager }
-    private val builder by lazy { NotificationCompat.Builder(this, CHANNEL_ID) }
+    private lateinit var notificationManager:NotificationManager
+    private lateinit var builder:NotificationCompat.Builder
 
     // Default server port (will be overridden by intent extra if provided)
     private var serverPort = 9555
@@ -45,7 +45,7 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
             val totalSeconds = millisUntilFinished / 1000
             val minutes = totalSeconds / 60
             val seconds = totalSeconds % 60
-            val timeString = String.format("%02d:%02d", minutes, seconds)
+            val timeString = String.format(java.util.Locale.US,"%02d:%02d", minutes, seconds)
             broadcastTimeout(timeString)
 
             builder.setContentText("0 clients, shutdown in $timeString")
@@ -62,7 +62,6 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
     companion object {
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "HeartRateChannel"
-        private const val PERMISSION_REQUEST_CODE = 100
         private const val SERVER_PORT_EXTRA = "server_port"
         const val BODY_SENSORS_PERMISSION = android.Manifest.permission.BODY_SENSORS
         const val TIMEOUT_ACTION = "com.zahndy.resohb.TIMEOUT_UPDATED"
@@ -71,6 +70,8 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
     override fun onCreate() {
         super.onCreate()
         heartRateRepository = HeartRateRepository(applicationContext)
+        notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        builder = NotificationCompat.Builder(this, CHANNEL_ID)
         createNotificationChannel()
     }
 
@@ -92,7 +93,7 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
             return START_NOT_STICKY
         }
 
-        val notification = createNotification("Starting heart rate server...")
+        val notification = createNotification()
         startForeground(NOTIFICATION_ID, notification)
 
         serviceScope.launch {
@@ -196,7 +197,7 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
                             lastNotificationUpdate = currentTime
                         }
                         else {
-                            notificationUpdateInterval = 2000L
+                            notificationUpdateInterval = 3000L
                         }
                     }
                     updatePowerSavingMode()
@@ -251,19 +252,21 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
         notificationManager.createNotificationChannel(channel)
     }
 
-    private fun createNotification(contentText: String): Notification {
+    private fun createNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java).apply {
             // These flags ensure we reuse the existing activity instance
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            //flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val activityOptions = ActivityOptions.makeBasic()
         activityOptions.setPendingIntentCreatorBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+        //activityOptions.pendingIntentCreatorBackgroundActivityStartMode = ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags, activityOptions.toBundle())
 
          builder
             .setContentTitle("Heart Rate Monitor")
-            .setContentText(contentText)
+            .setContentText("Starting heart rate server...")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
