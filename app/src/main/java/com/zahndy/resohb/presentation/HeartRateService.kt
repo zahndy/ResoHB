@@ -188,14 +188,10 @@ class HeartRateService : Service(), WebSocketServer.WebSocketServerCallback {
                     if (currentTime - lastNotificationUpdate > notificationUpdateInterval) {
                         val clientCount = webSocketServer.getConnectedClientCount()
                         if (clientCount > 0) {
-                            notificationUpdateInterval = 2000L
                             val clientText = if (clientCount == 1) "1 client" else "$clientCount clients"
                             builder.setContentText("HR: $heartRate BPM | $clientText connected")
                             notificationManager.notify(NOTIFICATION_ID, builder.build())
                             lastNotificationUpdate = currentTime
-                        }
-                        else {
-                            notificationUpdateInterval = 3000L
                         }
                     }
                     updatePowerSavingMode()
